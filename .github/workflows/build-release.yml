@@ -36,12 +36,6 @@ jobs:
     permissions:
       contents: read
 
-    container:
-      image: debian:bookworm
-      options: >-
-        --user root
-        --workdir /workspace
-
     steps:
       - name: Checkout repository
         continue-on-error: true
@@ -188,11 +182,6 @@ jobs:
   smoke-test:
     needs: build
     runs-on: ubuntu-latest
-    container:
-      image: debian:bookworm
-      options: >-
-        --user root
-        --workdir /workspace
 
     strategy:
       matrix:
