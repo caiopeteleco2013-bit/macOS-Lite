@@ -1,23 +1,19 @@
-name: Build macOS-Lite ISO (minimal test)
+name: Build macOS-Lite ISO (debootstrap test)
 
 on:
   push:
     branches: [ main ]
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install live-build with universe
+      - name: Install debootstrap
         run: |
-          echo "deb http://archive.ubuntu.com/ubuntu/ $(lsb_release -sc) universe" >> /etc/apt/sources.list
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends live-build debootstrap 2>&1 || echo "INSTALL FAILED"
-
-      - name: Check live-build
-        run: |
-          which lb || echo "lb not found"
-          lb --version 2>&1 || echo "lb version failed"
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends debootstrap 2>&1 || echo "DEBOOTSTRAP INSTALL FAILED"
+          which debootstrap || echo "debootstrap not found"
+          debootstrap --version 2>&1 || echo "debootstrap version failed"
