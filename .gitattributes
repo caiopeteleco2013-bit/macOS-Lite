@@ -1,0 +1,5 @@
+*.yml text eol=lf
+*.yaml text eol=lf
+*.sh text eol=lf
+*.hook.chroot text eol=lf
+*.hook.binary text eol=lf

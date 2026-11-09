@@ -19,7 +19,7 @@ on:
 
 env:
   ROOT_DIR: .
-  SOURCE_DATE_EPOCH: 1700000000   # fixed for reproducible builds (override per-release/tag)
+  SOURCE_DATE_EPOCH: 1700000000
 
 jobs:
   # ------------------------------------------------------------------
@@ -32,15 +32,9 @@ jobs:
       matrix:
         variant: [ default, nonfree-firmware ]
         architecture: [ amd64 ]
-        include:
-          - variant: default
-            apt-areas: "main contrib non-free-firmware"
-          - variant: nonfree-firmware
-            apt-areas: "main contrib non-free-firmware"
 
     permissions:
-      contents: read        # to fetch sources
-      id-token: write       # for OIDC (optional future use)
+      contents: read
 
     container:
       image: debian:bookworm
@@ -52,7 +46,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # needed for tags/version
+          fetch-depth: 0
 
       - name: Install build dependencies
         run: |
@@ -72,7 +66,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-apt-${{ matrix.variant }}-
 
-      - name: Restore ccache (for any custom package builds)
+      - name: Restore ccache
         id: cache-ccache
         uses: actions/cache/restore@v4
         with:
@@ -81,7 +75,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-ccache-${{ matrix.variant }}-
 
-      - name: Set SOURCE_DATE_EPOCH from tag (reproducibility)
+      - name: Set SOURCE_DATE_EPOCH from tag
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           TAG_DATE=$(git log -1 --format=%ct "${{ github.ref }}")
@@ -115,10 +109,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-logs-${{ matrix.variant }}
-          path: |
-            build/image/**
+          path: build/image/
 
       - name: Save ISO (unsigned, interim)
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: macos-lite-unsigned-${{ matrix.variant }}-${{ matrix.architecture }}
@@ -138,7 +132,7 @@ jobs:
         --workdir /workspace
 
     permissions:
-      contents: write   # to create release / upload assets
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -168,8 +162,6 @@ jobs:
           fi
           echo "$GPG_PRIVATE_KEY" | gpg --import --batch --yes
           if [ -n "$GPG_PASSPHRASE" ]; then
-            # Set trust so --default-key works without passphrase prompts
-            echo "trust-signing-key" 
             gpg --list-secret-keys --keyid-format long
           fi
           echo "skip_signing=false" >> "$GITHUB_ENV"
@@ -184,6 +176,7 @@ jobs:
           done
 
       - name: Upload signed artifacts
+        if: env.skip_signing != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: macos-lite-signed-${{ github.ref_name }}
@@ -239,17 +232,11 @@ jobs:
           fi
 
       - name: Upload smoke result
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: smoke-result-${{ matrix.variant }}
           path: smoke-result-*.json
-
-      - name: Fail on smoke test failure
-        if: failure()
-        run: |
-          echo "QEMU smoke test failed for ${{ matrix.variant }}"
-          cat smoke-result-*.json 2>/dev/null || true
-          exit 1
 
   # ------------------------------------------------------------------
   # Release — create GitHub Release and attach signed artifacts
