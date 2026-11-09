@@ -11,31 +11,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Test command
+      - name: Diagnostics
         run: |
-          echo "Hello from GitHub Actions"
-          pwd
-          ls -la
-
-      - name: Install live-build
-        run: |
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends live-build debootstrap
-
-      - name: Run lb config
-        run: |
-          lb config --architectures amd64 --distribution bookworm --mode debian || echo "lb config failed"
-
-      - name: Run lb build
-        continue-on-error: true
-        run: |
-          lb build --verbose 2>&1 | tee build.log || echo "lb build failed"
-
-      - name: Upload logs
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-logs
-          path: |
-            build.log
-            config/auto/*
+          echo "=== OS ==="
+          cat /etc/os-release
+          echo "=== apt sources ==="
+          cat /etc/apt/sources.list
+          ls -la /etc/apt/sources.list.d/
+          echo "=== apt update ==="
+          apt-get update 2>&1 || echo "APT UPDATE FAILED"
+          echo "=== apt search live-build ==="
+          apt-cache search live-build 2>&1 || echo "APT CACHE SEARCH FAILED"
+          echo "=== apt search debootstrap ==="
+          apt-cache search debootstrap 2>&1 || echo "APT CACHE SEARCH FAILED"
