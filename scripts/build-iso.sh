@@ -26,6 +26,13 @@ export DEBIAN_FRONTEND=noninteractive
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
+# ---- Ensure output dir exists early so we can always write a log ----
+rm -rf "$OUTPUT_DIR"
+mkdir -p "$OUTPUT_DIR"
+
+# ---- Redirect ALL subsequent output to both terminal and log file ----
+exec > >(tee -a "$BUILD_LOG") 2>&1
+
 echo "=== macOS-Lite ISO build ==="
 echo "Root:        $ROOT_DIR"
 echo "Variant:     $VARIANT"
@@ -33,6 +40,7 @@ echo "SOURCE_DATE_EPOCH: $SOURCE_DATE_EPOCH"
 echo "USER:        $(whoami)"
 echo "HOME:        $HOME"
 echo "PWD:         $PWD"
+echo "DATE:        $(date -u)"
 
 # ---- Prerequisite check ----
 echo "=== Prerequisite check ==="
@@ -44,16 +52,11 @@ for cmd in live-build lb debootstrap xorriso mksquashfs grub-mkrescue fakeroot; 
     fi
 done
 
-# Check debian-archive-keyring (needed by debootstrap)
 if dpkg -s debian-archive-keyring >/dev/null 2>&1; then
     echo "  OK: debian-archive-keyring installed"
 else
     echo "  WARNING: debian-archive-keyring NOT installed" >&2
 fi
-
-# ---- Clean previous build artifacts ----
-rm -rf "$OUTPUT_DIR"
-mkdir -p "$OUTPUT_DIR"
 
 # ---- Select live-build config ----
 case "$VARIANT" in
@@ -106,7 +109,7 @@ LB_ARGS=(
     --archive-areas "main contrib non-free-firmware"
     --bootappend-live "boot=live components quiet splash"
     --bootloader grub
-    "${GRUB_SPLASH_ARGS[@]}"
+    "${GRUB_SPLASH_ARGS[@]:-}"
     --iso-application "macOS-Lite"
     --iso-publisher "macOS-Lite Project"
     --iso-volume "macOS-Lite-$DATESTAMP"
@@ -123,7 +126,7 @@ LB_ARGS=(
 
 echo "=== Running lb config ==="
 echo "lb config ${LB_ARGS[*]} ${*:2}"
-lb config "${LB_ARGS[@]}" "${@:2}" 2>&1 | tee "$BUILD_LOG.config" || {
+lb config "${LB_ARGS[@]}" "${@:2}" 2>&1 | tee -a "$BUILD_LOG.config" || {
     echo "ERROR: lb config failed. See $BUILD_LOG.config" >&2
     exit 1
 }
@@ -133,13 +136,10 @@ ls -la config/auto/ 2>/dev/null || echo "config/auto/ does not exist"
 cat config/auto/* 2>/dev/null || echo "no auto config files"
 
 echo "=== Running lb build (verbose) ==="
-set -x
-lb build --verbose 2>&1 | tee "$BUILD_LOG" || {
-    set +x
+lb build --verbose 2>&1 | tee -a "$BUILD_LOG" || {
     echo "ERROR: lb build failed. See $BUILD_LOG" >&2
     exit 1
 }
-set +x
 
 # ---- Locate produced ISO ----
 echo "=== Locating produced ISO ==="
@@ -154,7 +154,7 @@ done
 if [ -z "$ISO_PATH" ] || [ ! -f "$ISO_PATH" ]; then
     echo "ERROR: no ISO produced." >&2
     echo "=== Contents of build tree ===" >&2
-    find "$ROOT_DIR" -name "*.iso" -o -name "*.build" -o -name "*.log" 2>/dev/null | head -20 >&2
+    find "$ROOT_DIR" \( -name "*.iso" -o -name "*.build" -o -name "*.log" \) 2>/dev/null | head -30 >&2
     exit 1
 fi
 

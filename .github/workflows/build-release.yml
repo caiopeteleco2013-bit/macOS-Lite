@@ -100,15 +100,23 @@ jobs:
             echo "iso_name=$(basename "$ISO_PATH")" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Debug: list build directory
+        if: always()
+        run: |
+          echo "=== build/image contents ==="
+          ls -laR build/image/ 2>/dev/null || echo "build/image/ does not exist"
+          echo "=== build.log tail ==="
+          tail -50 build/image/build.log 2>/dev/null || echo "no build.log"
+          echo "=== build.log.config tail ==="
+          tail -30 build/image/build.log.config 2>/dev/null || echo "no build.log.config"
+
       - name: Save build logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-logs-${{ matrix.variant }}
           path: |
-            build/image/*.sha256
-            build/image/*.build
-            build/image/*.log
+            build/image/**
 
       - name: Save ISO (unsigned, interim)
         uses: actions/upload-artifact@v4
