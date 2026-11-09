@@ -1,0 +1,41 @@
+name: Build macOS-Lite ISO (minimal test)
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Test command
+        run: |
+          echo "Hello from GitHub Actions"
+          pwd
+          ls -la
+
+      - name: Install live-build
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends live-build debootstrap
+
+      - name: Run lb config
+        run: |
+          lb config --architectures amd64 --distribution bookworm --mode debian || echo "lb config failed"
+
+      - name: Run lb build
+        continue-on-error: true
+        run: |
+          lb build --verbose 2>&1 | tee build.log || echo "lb build failed"
+
+      - name: Upload logs
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: |
+            build.log
+            config/auto/*
