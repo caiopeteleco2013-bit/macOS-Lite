@@ -66,6 +66,15 @@ EOF
         ;;
 esac
 
+# ---- Stage shell source into the chroot (so hooks can install it) ----
+STAGE_DIR="$CONFIG_DIR/includes.chroot/opt/macos-lite/src"
+rm -rf "$STAGE_DIR"
+mkdir -p "$STAGE_DIR"
+if [ -d "$ROOT_DIR/src" ]; then
+    cp -a "$ROOT_DIR/src/." "$STAGE_DIR/"
+    echo "Staged shell source into $STAGE_DIR"
+fi
+
 # ---- Configure live-build ----
 cd "$ROOT_DIR"
 lb clean --binary --chroot 2>/dev/null || true

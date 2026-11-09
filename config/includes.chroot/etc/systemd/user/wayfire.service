@@ -1,0 +1,13 @@
+[Unit]
+Description=Wayfire compositor (macOS-Lite shell)
+After=graphical-session.target seatd.service
+Wants=seatd.service
+
+[Service]
+ExecStart=/usr/bin/wayfire
+Restart=always
+RestartSec=2
+Environment=WLR_NO_HARDWARE_CURSORS=1
+
+[Install]
+WantedBy=graphical-session.target

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Spotlight Search
+Comment=Search applications, files, and settings
+Exec=mlite-launcher
+Icon=system-search
+Type=Application
+Categories=System;Utility;
+NoDisplay=true
+OnlyShowIn=Wayfire;

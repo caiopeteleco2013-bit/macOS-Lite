@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Notification Center
+Comment=Notifications and calendar
+Exec=mlite-notification-center
+Icon=mail-message-new
+Type=Application
+Categories=System;Utility;
+NoDisplay=true
+OnlyShowIn=Wayfire;

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=macOS-Lite Bar
+Comment=Top bar / system menu
+Exec=mlite-bar
+Icon=mlite-bar
+Type=Application
+Categories=System;DesktopSettings;
+NoDisplay=true
+OnlyShowIn=Wayfire;

@@ -1,0 +1,32 @@
+#!/bin/sh
+# live-build chroot hook: install macOS-Lite shell components into /usr/bin.
+# Source files are staged at /opt/macos-lite/src/ (copied from repo src/ by
+# build-iso.sh before lb build).
+
+set -e
+
+SRC=/opt/macos-lite/src
+
+install_shell() {
+    # $1 = component name (mlite-bar, mlite-launcher, etc.)
+    local comp="$1"
+    if [ -f "$SRC/$comp/${comp}.py" ]; then
+        install -m 0755 "$SRC/$comp/${comp}.py" "/usr/bin/$comp"
+        echo "Installed /usr/bin/$comp"
+    else
+        echo "WARNING: $SRC/$comp/${comp}.py not found, skipping."
+    fi
+}
+
+install_shell mlite-bar
+install_shell mlite-launcher
+install_shell mlite-control-center
+install_shell mlite-notification-center
+
+# Common theme assets (CSS) — make available system-wide
+mkdir -p /usr/share/macos-lite/theme
+if [ -d "$SRC/common" ]; then
+    cp -a "$SRC/common/." /usr/share/macos-lite/theme/
+fi
+
+echo "[0250-install-shell] done"

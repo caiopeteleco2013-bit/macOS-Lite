@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=System Settings
+Comment=macOS-Lite Control Center
+Exec=mlite-control-center
+Icon=preferences-system
+Type=Application
+Categories=System;Settings;
+OnlyShowIn=Wayfire;

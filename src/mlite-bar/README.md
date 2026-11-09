@@ -1,12 +1,24 @@
 # mlite-bar — macOS-Lite top bar
 
-GTK4 + LayerShell top bar. Placeholder stub; wire up:
+Reproduces the macOS menu bar using GTK4 + LayerShell.
 
-- App menu button ("macOS-Lite", original glyph — no Apple logo)
-- Active window title (from Wayfire via IPC / wlrctl)
-- System indicators: sound (PipeWire), battery (upower), network (NetworkManager), clock
+Layout (left → center → right):
+- **macOS-Lite menu button** (replaces the Apple menu) → opens Spotlight-like launcher
+- **Active window title** (polled from Wayfire every 0.5s)
+- **Status indicators**: Wi-Fi, Sound, Battery, Date/Time
+- Click the **time** → opens Notification Center
 
-Build as a Debian package and install to /usr/bin/mlite-bar.
-Autostart via /etc/xdg/autostart/mlite-bar.desktop (see config/hooks/0200-desktop-config.hook.chroot).
+## Key bindings (Wayfire)
+| Binding | Action |
+|---------|--------|
+| Super + Space | Spotlight-like launcher (`mlite-launcher`) |
+| Super + Shift + Space | Control Center (`mlite-control-center`) |
+| Super + C | Notification Center (`mlite-notification-center`) |
+| Super + Q / W | Close window |
+| Super + H / M | Minimize / tile |
+| Super + Arrows | Move focus / window |
+| Super + 1-4 | Switch workspace |
+| Super + Tab | Window switcher |
+| Super + ` | Expo / Mission Control |
 
-No Apple code/assets.
+No Apple code or assets. MIT licensed.

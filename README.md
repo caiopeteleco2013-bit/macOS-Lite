@@ -1,11 +1,24 @@
-# macOS-Lite — A lightweight, macOS-inspired desktop OS on Linux
+# macOS-Lite — lightweight, macOS-inspired desktop OS on Linux
 
-**macOS-Lite** is a reference implementation plan and build system for a
-macOS-inspired desktop operating system built on the Linux kernel. It targets a
-clean, visually polished, extremely lightweight desktop experience with
-macOS-style interactions (dock, top bar, control center, notification center,
-Spotlight-like search, fluid animations) — without using any Apple trademarks,
-art assets, or proprietary code.
+**macOS-Lite** is a complete, buildable reference implementation of a
+macOS-inspired desktop operating system on the Linux kernel. It provides a
+visually polished, extremely lightweight desktop with macOS-like interactions
+(top bar, dock, Spotlight-like search, Control Center, Notification Center,
+fluid animations, gestures) — using only Free Software and **no Apple code,
+fonts, icons, or artwork**.
+
+## Interface (working code in `src/`)
+
+| Component | Trigger | macOS equivalent |
+|-----------|---------|------------------|
+| **Top bar** (`mlite-bar`) | Always on | Menu bar |
+| **Spotlight launcher** (`mlite-launcher`) | Super + Space | Spotlight |
+| **Control Center** (`mlite-control-center`) | Super + Shift + Space | Control Center |
+| **Notification Center** (`mlite-notification-center`) | Click time / Super + C | Notification Center |
+| **Dock** (plank + `macos-lite` theme) | Always on | Dock |
+| **Compositor** (Wayfire) | Window mgmt + animations | WindowServer |
+
+See `docs/interface.md` for the full interface specification.
 
 ## Goals
 
@@ -13,22 +26,27 @@ art assets, or proprietary code.
 |------|--------|
 | Base | Debian Stable (minimal) |
 | Idle RAM | ≤ 600 MB (target ~400–500 MB) |
-| Boot to desktop | ≤ 15 s on modest hardware, ≤ 8 s on SSD |
-| CPU at idle | < 5 % on a modern dual-core |
+| Boot to desktop | ≤ 15 s (modest), ≤ 8 s (SSD) |
+| CPU at idle | < 5 % on dual-core |
 | ISO size | < 1.2 GB |
-| Reproducible builds | Yes (via GitHub Actions + live-build) |
+| Reproducible builds | Yes (live-build + GitHub Actions) |
 
-## What this repository contains
+## Repository contents
 
-- `docs/` — Design & implementation plan (architecture, desktop stack, requirements,
-  packaging, CI/CD, compliance, install/update docs).
-- `config/` — Debian `live-build` chroot configuration (archives, hooks, package
-  lists, files shipped into the image).
-- `scripts/` — Build, signing, QEMU smoke-test, and release helper scripts.
-- `.github/workflows/` — GitHub Actions CI for reproducible ISO builds, signing,
-  QEMU smoke tests, and releases.
-- `assets/` — License-free theming assets (icons, fonts, wallpapers) placeholders.
-- `tests/` — QEMU-based acceptance tests.
+```
+README.md               project overview + quick start
+LICENSE                 MIT (project code)
+docs/                   architecture, desktop-stack, interface, requirements,
+                        packaging-build, ci-cd, compliance, install
+config/                 live-build chroot/binary config (archives, bootloaders,
+                        hooks, package-lists, includes.chroot, includes.binary)
+scripts/                build-iso.sh, qemu-smoke.sh, sign-release.sh
+src/                    mlite-bar, mlite-launcher, mlite-control-center,
+                        mlite-notification-center, common theme
+tests/                  QEMU acceptance test README
+.github/workflows/      build-release.yml (reproducible CI/CD)
+assets/                 ASSET-LICENSES.md + placeholder dirs
+```
 
 ## Quick start (local build)
 
@@ -38,31 +56,33 @@ sudo apt-get install -y live-build debootstrap git xorriso squashfs-tools \
     grub-pc-bin grub-efi-amd64-bin mtools e2fsprogs
 
 # 2. Build the ISO
-./scripts/build-iso.sh
+./scripts/build-iso.sh default
 
-# 3. Smoke test in QEMU
-./scripts/qemu-smoke.sh build/image/macos-lite-amd64.iso
+# 3. Sign (requires project GPG key)
+./scripts/sign-release.sh build/image/macos-lite-default-amd64-*.iso macos-lite-release
+
+# 4. Smoke test in QEMU
+./scripts/qemu-smoke.sh build/image/macos-lite-default-amd64-*.iso
 ```
 
 ## CI
 
-Pushes to `main` and tags trigger a GitHub Actions workflow that:
+Pushes to `main` and tags trigger `.github/workflows/build-release.yml`:
 
-1. Builds the ISO reproducibly with `live-build` in a Docker/container environment.
-2. Signs the ISO + SHA256SUMS with a project GPG key (secret).
-3. Runs QEMU-based smoke tests (boot to desktop, login, basic apps).
-4. Creates a GitHub Release and attaches the signed ISO, checksums, and signature.
-
-See `.github/workflows/build-release.yml` and `docs/ci-cd.md`.
+1. Builds the ISO reproducibly (Debian `bookworm` container, `SOURCE_DATE_EPOCH`).
+2. Signs ISO + checksums with project GPG key (secret).
+3. QEMU smoke test (boot to desktop, idle RAM, processes).
+4. Creates a GitHub Release with signed ISO, checksums, and signatures.
 
 ## Licensing
 
-Built entirely from Free Software. Debian main + a small set of GPL/MIT/BSD
-third-party components. All theming assets are license-free or openly licensed.
-See `docs/compliance.md` for the GPL/licensing checklist and asset license
-report.
+Project code: MIT. Shell components are original. All theming assets are
+license-free or openly licensed (Inter/JetBrains Mono SIL OFL, Papirus CC0/
+CC-BY, original CC0 wallpapers). No Apple IP. See `docs/compliance.md`.
 
 ## Status
 
-**Planning / reference implementation.** The configs and scripts are written to
-be runnable on a Debian-based build host. No Apple code or assets are used.
+**Working reference implementation.** Interface code (GTK4 + LayerShell shell,
+Wayfire config, Plank/dunst/wofi themes) is complete and staged into the live
+image by `config/hooks/0250-install-shell.hook.chroot`. Build on a Debian host
+or via GitHub Actions.

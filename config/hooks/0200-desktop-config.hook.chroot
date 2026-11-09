@@ -1,13 +1,17 @@
 #!/bin/sh
 # live-build chroot hook: install desktop/compositor/shell configuration.
 # Places wayfire, plank, dunst, wofi configs and autostart entries.
+# Reproduces macOS-like interactions: top bar, dock, Spotlight, control center,
+# notification center, window animations, gestures.
 
 set -e
 
 USERNAME="${LIVE_USER:-user}"
 USERHOME="/home/$USERNAME"
 
-# ---- Wayfire config ----
+# =======================================================================
+# Wayfire — compositor / window manager (macOS-like window management)
+# =======================================================================
 mkdir -p /etc/xdg/wayfire
 cat > /etc/xdg/wayfire/config.ini <<'EOF'
 [core]
@@ -57,19 +61,61 @@ mode = window
 mlite-bar = /usr/bin/mlite-bar
 plank = /usr/bin/plank
 dunst = /usr/bin/dunst
+
+[bindings]
+# --- macOS-like keybindings ---
+# Super + Space  : Spotlight-like launcher
+<super> KEY_SPACE = exec mlite-launcher
+# Super + Shift + Space : Control Center
+<super><shift> KEY_SPACE = exec mlite-control-center
+# Super + C : Notification Center (click time also opens it)
+<super> KEY_C = exec mlite-notification-center
+# Super + Q : Close window (macOS: close window)
+<super> KEY_Q = kill
+# Super + W : Close tab/window
+<super> KEY_W = kill
+# Super + H : Hide window (minimize)
+<super> KEY_H = toggletiled
+# Super + M : Maximize / tile
+<super> KEY_M = toggletiled
+# Super + Arrows : move focus between windows (macOS: switch windows)
+<super> KEY_LEFT = focusview left
+<super> KEY_RIGHT = focusview right
+<super> KEY_UP = focusview up
+<super> KEY_DOWN = focusview down
+# Super + Shift + Arrows : move window
+<super><shift> KEY_LEFT = moveview left
+<super><shift> KEY_RIGHT = moveview right
+<super><shift> KEY_UP = moveview up
+<super><shift> KEY_DOWN = moveview down
+# Super + 1..4 : switch workspace
+<super> KEY_1 = workspace 1
+<super> KEY_2 = workspace 2
+<super> KEY_3 = workspace 3
+<super> KEY_4 = workspace 4
+# Super + Tab : window switcher (Alt-Tab equivalent)
+<super> KEY_TAB = nextview
+# Super + ` : switch workspace (mission control / expo)
+<super> KEY_GRAVE = expo
+# Super + Arrow (with shift) : snap / tile
+# Super + F : fullscreen
+<super> KEY_F = fullscreen
+# Super + C (control center), Super + V (notifications) done above
 EOF
 
-# ---- Plank dock settings ----
+# =======================================================================
+# Plank dock — macOS-like dock at bottom
+# =======================================================================
 mkdir -p /etc/xdg/plank
 cat > /etc/xdg/plank/dock1.settings <<'EOF'
 [Dock1]
 Screen = 0
 Monitor = 0
 IconSize = 48
-ZoomAmount = 1.45
+ZoomAmount = 1.5
 HideMode = Intelligent
-HideDelay = 500
-UnhideDelay = 100
+HideDelay = 400
+UnhideDelay = 80
 Offset = 0
 ItemsAlign = Center
 PinOnLaunch = true
@@ -79,13 +125,45 @@ Current = Gtk+
 Position = Bottom
 EOF
 
-# ---- dunst notification config ----
+# Plank macOS-like theme (original)
+mkdir -p /usr/share/plank/themes/macos-lite
+cat > /usr/share/plank/themes/macos-lite/dock.theme <<'EOF'
+[PlankDockTheme]
+FillColor = 0.12 0.12 0.14 0.62
+TintColor = 0.90 0.90 0.92 1.00
+LineColor = 0.00 0.00 0.00 0.00
+BorderWidth = 1
+SlotWidth = 62
+SlotHeight = 62
+ItemPadding = 10
+ItemIconSize = 40
+HoverItemIconSize = 52
+UrgentItemIconSize = 52
+DockItemOffset = 0
+FadeSpeed = 0.4
+ZoomPerDev = 0.02
+ZoomMaxDev = 0.6
+ZoomPeriod = 0.15
+PressAnimDuration = 0.12
+HideAnimation = Slide
+SlideSize = 44
+RoundRectangleRadius = 22
+ShowSeparators = true
+SeparatorColor = 0.40 0.40 0.42 0.50
+EOF
+cat > /usr/share/plank/themes/macos-lite/README.txt <<'EOF'
+macOS-Lite dock theme (original). No Apple assets.
+EOF
+
+# =======================================================================
+# dunst — notifications (macOS-like bubbles)
+# =======================================================================
 mkdir -p /etc/dunst
 cat > /etc/dunst/dunstrc <<'EOF'
 [global]
     monitor = 0
     follow = none
-    geometry = "300x5-30+30"
+    geometry = "360x5-12+12"
     indicate_hidden = yes
     shrink = no
     sort = yes
@@ -98,7 +176,7 @@ cat > /etc/dunst/dunstrc <<'EOF'
     history_length = 20
     show_age_threshold = 60
     word_wrap = yes
-    ellipse_length = 50
+    ellipse_length = 55
     ignore_newline = no
     stack_duplicates = true
     hide_duplicate_count = no
@@ -108,8 +186,8 @@ cat > /etc/dunst/dunstrc <<'EOF'
     frame_color = "#aaaaaa"
 
     separator_height = 2
-    padding = 10
-    horizontal_padding = 10
+    padding = 12
+    horizontal_padding = 12
 
     startup_notification = false
     dmenu = /usr/bin/wofi --dmenu
@@ -129,22 +207,24 @@ cat > /etc/dunst/dunstrc <<'EOF'
     context = ctrl+shift+semicolon
 
 [urgency_low]
-    background = "#2e3440"
-    foreground = "#d8dee9"
-    timeout = 10
+    background = "#ffffff"
+    foreground = "#1d1d1f"
+    timeout = 8
 
 [urgency_normal]
-    background = "#2e3440"
-    foreground = "#d8dee9"
-    timeout = 10
+    background = "#ffffff"
+    foreground = "#1d1d1f"
+    timeout = 8
 
 [urgency_critical]
-    background = "#bf616a"
-    foreground = "#d8dee9"
+    background = "#ff5f56"
+    foreground = "#ffffff"
     timeout = 0
 EOF
 
-# ---- wofi config (Spotlight-like launcher) ----
+# =======================================================================
+# wofi — Spotlight-like launcher config
+# =======================================================================
 mkdir -p /etc/wofi
 cat > /etc/wofi/config <<'EOF'
 width=500
@@ -161,40 +241,45 @@ EOF
 cat > /etc/wofi/style.css <<'EOF'
 window {
     margin: 0px;
-    border: 2px solid #0a84ff;
-    border-radius: 10px;
+    border: 1px solid #0a84ff;
+    border-radius: 14px;
     font-family: "Inter";
     font-size: 14px;
+    background-color: #1c1c1e;
 }
 #input {
     margin: 10px;
     border: none;
     border-bottom: 2px solid #0a84ff;
     border-radius: 0px;
-    color: #d8dee9;
+    color: #ffffff;
     background-color: #1c1c1e;
+    font-size: 17px;
+    padding: 10px 16px;
 }
 #inner-box {
     margin: 10px;
     border: none;
-    border-radius: 10px;
+    border-radius: 14px;
     background-color: #1c1c1e;
 }
 #outer-box {
     margin: 10px;
     border: none;
-    border-radius: 10px;
+    border-radius: 14px;
     background-color: #1c1c1e;
 }
 #entry:selected {
     background-color: #0a84ff;
     color: #ffffff;
-    border-radius: 6px;
+    border-radius: 8px;
 }
 EOF
 
-# ---- Autostart desktop files (system-wide defaults) ----
-mkdir -p /etc/xdg/autostart
+# =======================================================================
+# Autostart desktop files
+# =======================================================================
+mkdir -p /etc/xdg/autostart /etc/xdg/wayfire
 cat > /etc/xdg/autostart/mlite-bar.desktop <<'EOF'
 [Desktop Entry]
 Name=macOS-Lite Bar
@@ -223,10 +308,11 @@ Categories=System;
 OnlyShowIn=Wayfire;
 EOF
 
-# ---- Per-user skeleton config (copied to new users at install) ----
-mkdir -p /etc/skel/.config/wayfire
+# =======================================================================
+# Per-user skeleton config
+# =======================================================================
+mkdir -p /etc/skel/.config/wayfire /etc/skel/.config/plank /etc/skel/.config/dunst /etc/skel/.config/wofi
 cp /etc/xdg/wayfire/config.ini /etc/skel/.config/wayfire/config.ini
-mkdir -p /etc/skel/.config/plank /etc/skel/.config/dunst /etc/skel/.config/wofi
 cp /etc/xdg/plank/dock1.settings /etc/skel/.config/plank/dock1.settings
 cp /etc/dunst/dunstrc /etc/skel/.config/dunst/dunstrc
 cp /etc/wofi/config /etc/skel/.config/wofi/config

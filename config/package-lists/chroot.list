@@ -130,12 +130,10 @@ cups-browsed
 printer-driver-all
 system-config-printer
 
-# --- Custom macOS-Lite shell (built from src/, installed as .deb) ---
-# mlite-bar
-# mlite-control-center
-# mlite-notification-center
-# mlite-launcher
-# (installed from config/includes.chroot/root/debs/*.deb during build)
+# --- Custom macOS-Lite shell (installed via config/hooks/0250-install-shell.hook.chroot
+#     from src/ staged at config/includes.chroot/opt/macos-lite/src/) ---
+#     mlite-bar, mlite-launcher, mlite-control-center,
+#     mlite-notification-center (Python + GTK4 + LayerShell; original, MIT)
 
 # --- System tuning ---
 zram-generator

@@ -1,0 +1,99 @@
+/*
+ * macOS-Lite — system-wide GTK4 theme
+ * Original design inspired by macOS visual language. No Apple code or assets.
+ * Fonts: Inter (UI), JetBrains Mono (monospace). Accent: #0A84FF (macOS-like blue).
+ */
+
+* {
+    -gtk-icon-theme: "Papirus";
+    -gtk-cursor-theme-name: "Bibata-Modern-Ice";
+    font-family: "Inter", sans-serif;
+    font-size: 13px;
+}
+
+/* Base window / app background */
+window,
+box,
+frame,
+entry,
+spinbutton,
+combobox,
+scale,
+button,
+notebook {
+    font-family: "Inter";
+    font-size: 13px;
+    border-radius: 8px;
+    transition: all 200ms ease;
+}
+
+/* Buttons */
+button {
+    border-radius: 6px;
+    min-height: 28px;
+    padding: 6px 14px;
+    background-color: #e5e5ea;
+    color: #1d1d1f;
+    border: none;
+    outline: none;
+}
+button:checked,
+button:active,
+button:hover {
+    background-color: #0a84ff;
+    color: #ffffff;
+    box-shadow: 0 0 0 1px rgba(10, 132, 255, 0.35);
+}
+
+/* Entries */
+entry {
+    border-radius: 6px;
+    border: 1px solid #d1d1d6;
+    padding: 6px 10px;
+    background-color: #ffffff;
+    color: #1d1d1f;
+    selection-background-color: #0a84ff;
+    selection-color: #ffffff;
+}
+entry:focus {
+    border-color: #0a84ff;
+    box-shadow: 0 0 0 1px rgba(10, 132, 255, 0.5);
+}
+
+/* Sidebar / list views */
+treeview,
+listview {
+    border-radius: 8px;
+    border: none;
+    background-color: #f2f2f7;
+    color: #1d1d1f;
+    outline: none;
+}
+treeview:selected,
+listview:selected {
+    background-color: #0a84ff;
+    color: #ffffff;
+}
+
+/* Scrollbars */
+scrollbar slider {
+    min-width: 10px;
+    min-height: 10px;
+    border-radius: 5px;
+    background-color: rgba(0,0,0,0.15);
+}
+
+/* macOS-style traffic-light window buttons (client-side decorations) */
+.title-button {
+    border-radius: 12px;
+    min-width: 24px;
+    min-height: 24px;
+    padding: 0;
+    margin: 2px;
+}
+.title-button.close { background-color: #ff5f56; }
+.title-button.close:hover { background-color: #ff3b30; }
+.title-button.minimize { background-color: #ffbd2e; }
+.title-button.minimize:hover { background-color: #ffcc00; }
+.title-button.maximize { background-color: #28c840; }
+.title-button.maximize:hover { background-color: #30d158; }

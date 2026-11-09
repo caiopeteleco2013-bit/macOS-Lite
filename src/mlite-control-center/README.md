@@ -1,15 +1,8 @@
-# mlite-control-center — System Settings panel
+# mlite-control-center — System Settings / Control Center
 
-GTK4 modal window with toggles:
+Modal window with toggles:
+- Wi-Fi, Bluetooth, Sound, Displays (brightness), Appearance (dark mode), About
 
-- Wi-Fi (NetworkManager/nmcli)
-- Bluetooth (BlueZ) — opt-in
-- Sound (PipeWire/wpctl)
-- Brightness (brightnessctl)
-- Dark/light mode (GTK setting)
-- Displays (wlr-randr)
-- Users / About
+Triggered by **Super + Shift + Space** or the top-bar menu.
 
-Bound to top-bar gear icon; optional Super+Search entry.
-
-No Apple code/assets.
+No Apple code or assets. MIT licensed.
