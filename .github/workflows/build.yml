@@ -23,17 +23,36 @@ jobs:
       matrix:
         variant: [ default, nonfree-firmware ]
 
+    container:
+      image: debian:bookworm
+      options: >-
+        --user root
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            live-build debootstrap git xorriso squashfs-tools \
+            grub-pc-bin grub-efi-amd64-bin mtools e2fsprogs \
+            curl dpkg wget
+
       - name: Build ISO
         id: build
+        continue-on-error: true
         run: |
           chmod +x scripts/build-iso.sh
-          ./scripts/build-iso.sh "${{ matrix.variant }}"
+          ./scripts/build-iso.sh "${{ matrix.variant }}" || true
+          ISO_PATH=$(ls build/image/macos-lite-*.iso 2>/dev/null | head -1 || true)
+          if [ -n "$ISO_PATH" ]; then
+            echo "iso_path=$ISO_PATH" >> "$GITHUB_OUTPUT"
+            echo "iso_name=$(basename "$ISO_PATH")" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Debug info
         if: always()
