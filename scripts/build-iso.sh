@@ -1,9 +1,9 @@
 #!/bin/bash
 #
-# build-iso.sh — Build a reproducible macOS-Lite ISO.
+# build-iso.sh — Build a reproducible macOS-Lite ISO without apt-get.
 #
-# Tries apt-get with Debian mirror first, falls back to downloading .deb
-# packages directly with curl and installing with dpkg.
+# Downloads .deb packages directly from Debian's package pool using curl
+# and installs them with dpkg. Creates the chroot with debootstrap.
 #
 # Usage: ./scripts/build-iso.sh [variant]
 #   variant: "" (default, DFSG-free) | "nonfree-firmware"
@@ -36,65 +36,43 @@ echo "DATE:        $(date -u)"
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
 
+# Redirect ALL output to log file as well
 exec > >(tee -a "$BUILD_LOG") 2>&1
 
 # ---- Prerequisite check ----
 echo "=== Prerequisite check ==="
-for cmd in curl dpkg xorriso grub-mkrescue mksquashfs mtools e2fsprogs wget apt-get; do
+for cmd in curl dpkg xorriso grub-mkrescue mksquashfs mtools e2fsprogs wget gpg; do
     if command -v "$cmd" >/dev/null 2>&1; then
-        echo "  OK: $cmd"
+        echo "  OK: $cmd -> $(command -v "$cmd")"
     else
-        echo "  MISSING: $cmd"
+        echo "  MISSING: $cmd" >&2
     fi
 done
 
-# ---- Try apt-get with Debian mirror ----
-echo "=== Trying apt-get with Debian mirror ==="
-echo "deb http://deb.debian.org/debian/ bookworm main contrib non-free-firmware" > /etc/apt/sources.list
-echo "deb http://security.debian.org/ bookworm-security main contrib non-free-firmware" >> /etc/apt/sources.list
-apt-get update 2>&1 | tail -10
-APT_UPDATE_OK=$?
+# ---- Download debootstrap .deb directly from Debian pool ----
+echo "=== Installing debootstrap ==="
+DEBOOTSTRAP_DEB="/tmp/debootstrap_all.deb"
 
-if [ "$APT_UPDATE_OK" = "0" ]; then
-    echo "apt-get update SUCCEEDED"
-    if DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends debootstrap live-build 2>&1 | tail -10; then
-        echo "apt-get install SUCCEEDED"
-        HAS_DEBOOTSTRAP=1
-    else
-        echo "apt-get install FAILED"
-        HAS_DEBOOTSTRAP=0
+# Try to find latest version from Packages index
+LATEST_VER=$(curl -fsSL --max-time 30 \
+    "http://deb.debian.org/debian/dists/bookworm/main/binary-all/Packages" 2>/dev/null \
+    | awk -v RS='' '/^Package: debootstrap$/{match($0,/Version: ([0-9.]+)/,a); print a[1]; exit}')
+
+if [ -n "$LATEST_VER" ]; then
+    echo "Found debootstrap version: $LATEST_VER"
+    if curl -fsSL --max-time 60 \
+        -o "$DEBOOTSTRAP_DEB" \
+        "http://deb.debian.org/debian/pool/main/d/debootstrap/debootstrap_${LATEST_VER}_all.deb"; then
+        echo "Downloaded debootstrap ${LATEST_VER}"
+        dpkg -i "$DEBOOTSTRAP_DEB" 2>/dev/null || true
+        dpkg --configure -a 2>/dev/null || true
     fi
-else
-    echo "apt-get update FAILED"
-    HAS_DEBOOTSTRAP=0
 fi
 
-# ---- Fallback: download debootstrap .deb directly with curl ----
-if [ "$HAS_DEBOOTSTRAP" != "1" ]; then
-    echo "=== Downloading debootstrap .deb directly ==="
-    DEBOOTSTRAP_DEB="/tmp/debootstrap_all.deb"
-    
-    # Try to find latest version from Packages index
-    LATEST_VER=$(curl -fsSL --max-time 30 \
-        "http://deb.debian.org/debian/dists/bookworm/main/binary-all/Packages" 2>/dev/null \
-        | awk -v RS='' '/^Package: debootstrap$/{match($0,/Version: ([0-9.]+)/,a); print a[1]; exit}')
-    
-    if [ -n "$LATEST_VER" ]; then
-        echo "Found debootstrap version: $LATEST_VER"
-        if curl -fsSL --max-time 60 \
-            -o "$DEBOOTSTRAP_DEB" \
-            "http://deb.debian.org/debian/pool/main/d/debootstrap/debootstrap_${LATEST_VER}_all.deb"; then
-            echo "Downloaded debootstrap ${LATEST_VER}"
-            dpkg -i "$DEBOOTSTRAP_DEB" 2>/dev/null || true
-            dpkg --configure -a 2>/dev/null || true
-        fi
-    fi
-    
-    # Also try known versions
-    for ver in 1.0.131 1.0.130 1.0.129 1.0.128 1.0.127; do
-        if [ -f "$DEBOOTSTRAP_DEB" ] && dpkg -s debootstrap 2>/dev/null | grep -q "Status: install ok installed"; then
-            break
-        fi
+# Fallback: try known versions
+if ! command -v debootstrap >/dev/null 2>&1; then
+    for ver in 1.0.131 1.0.130 1.0.129 1.0.128 1.0.127 1.0.126; do
+        echo "Trying debootstrap ${ver}..."
         if curl -fsSL --max-time 30 \
             -o "$DEBOOTSTRAP_DEB" \
             "http://deb.debian.org/debian/pool/main/d/debootstrap/debootstrap_${ver}_all.deb" 2>/dev/null; then
@@ -117,10 +95,14 @@ case "$VARIANT" in
     default)
         echo "Building DFSG-free variant."
         ARCHIVE_URL="http://deb.debian.org/debian"
+        SECURITY_URL="http://security.debian.org/debian-security"
+        EXTRA_AREAS="main"
         ;;
     nonfree-firmware)
         echo "Building nonfree-firmware variant."
         ARCHIVE_URL="http://deb.debian.org/debian"
+        SECURITY_URL="http://security.debian.org/debian-security"
+        EXTRA_AREAS="main contrib non-free-firmware"
         ;;
     *)
         echo "ERROR: unknown variant '$VARIANT'" >&2
@@ -157,14 +139,14 @@ echo "Chroot created at $CHROOT_DIR"
 echo "=== Copying custom files into chroot ==="
 cp -a "$CONFIG_DIR/includes.chroot/." "$CHROOT_DIR/"
 
-# ---- Download and install essential packages into chroot ----
+# ---- Download essential packages directly from Debian pool ----
 echo "=== Downloading essential packages ==="
 PKG_DIR="/tmp/macos-lite-pkgs"
 rm -rf "$PKG_DIR"
 mkdir -p "$PKG_DIR"
 
 ESSENTIAL_PKGS=(
-    wayfire plank dunst wofi pipewire pipewire-pulse
+    wayfire plank dunst wofi pipewire pipewire-pulse wireplumber
     network-manager seatd elogind brightnessctl wlr-randr
     firefox-esr foot gedit thunar viewnior
 )
@@ -178,24 +160,31 @@ for pkg in "${ESSENTIAL_PKGS[@]}"; do
             f && $1=="Filename:" {print $2; f=0; exit}
         ')
     if [ -n "$PKG_FILE" ]; then
-        DEB="$PKG_DIR/$(basename "$PKG_FILE")"
-        if [ ! -f "$DEB" ]; then
-            curl -fsSL --max-time 60 -o "$DEB" \
-                "http://deb.debian.org/debian/${PKG_FILE}" || {
-                echo "  WARNING: Failed $pkg"; continue
-            }
+        DEB_FILE="$PKG_DIR/$(basename "$PKG_FILE")"
+        if [ ! -f "$DEB_FILE" ]; then
+            if curl -fsSL --max-time 60 \
+                -o "$DEB_FILE" \
+                "http://deb.debian.org/debian/${PKG_FILE}"; then
+                echo "  OK: $(basename "$PKG_FILE")"
+            else
+                echo "  WARNING: Failed to download $pkg"
+                continue
+            fi
+        else
+            echo "  OK (cached): $(basename "$PKG_FILE")"
         fi
-        echo "  OK: $(basename "$PKG_FILE")"
     else
-        echo "  WARNING: $pkg not found"
+        echo "  WARNING: $pkg not found in main archive"
     fi
 done
 
 # Install downloaded packages into chroot
+echo "=== Installing packages into chroot ==="
 for deb in "$PKG_DIR"/*.deb; do
     [ -f "$deb" ] || continue
     echo "Installing $(basename "$deb") into chroot..."
     dpkg --root="$CHROOT_DIR" -i "$deb" 2>/dev/null || {
+        echo "  dpkg --root failed, extracting manually..."
         dpkg-deb -x "$deb" "$CHROOT_DIR/" 2>/dev/null || true
     }
 done
@@ -219,31 +208,42 @@ ISO_DIR="$OUTPUT_DIR/iso"
 rm -rf "$ISO_DIR"
 mkdir -p "$ISO_DIR/boot/grub"
 
+# Copy kernel and initrd from chroot
 KERNEL=$(ls "$CHROOT_DIR/boot/vmlinuz-*amd64" 2>/dev/null | head -1)
 INITRD=$(ls "$CHROOT_DIR/boot/initrd.img-*amd64" 2>/dev/null | head -1)
 if [ -n "$KERNEL" ] && [ -n "$INITRD" ]; then
     cp "$KERNEL" "$ISO_DIR/boot/vmlinuz"
     cp "$INITRD" "$ISO_DIR/boot/initrd.img"
+    echo "Kernel: $(basename "$KERNEL")"
+    echo "Initrd: $(basename "$INITRD")"
 else
-    echo "WARNING: No kernel/initrd found"
+    echo "WARNING: No kernel/initrd found in chroot, ISO may not boot"
 fi
 
+# Create GRUB config
 cat > "$ISO_DIR/boot/grub/grub.cfg" <<'GRUBCFG'
 set default=0
 set timeout=5
 set gfxmode=auto
 load_video
 insmod gfxterm
+
 menuentry "macOS-Lite (live)" {
     linux /boot/vmlinuz boot=live components quiet splash
     initrd /boot/initrd.img
 }
-menuentry "Shut down" { halt }
+
+menuentry "Shut down" {
+    halt
+}
 GRUBCFG
 
+# Create the ISO with xorriso
 xorriso -as mkisofs \
     -o "$OUTPUT_DIR/macos-lite-${VARIANT}-amd64-${DATESTAMP}.iso" \
-    -V "macOS-Lite" -volid "macOS-Lite" -A "macOS-Lite" \
+    -V "macOS-Lite" \
+    -volid "macOS-Lite" \
+    -A "macOS-Lite" \
     -b boot/grub/i386-pc/eltorito.img \
     -c boot/grub/boot.cat \
     -no-emul-boot -boot-load-size 4 -boot-info-table \
@@ -262,7 +262,3 @@ echo "=== Build complete ==="
 echo "ISO:       $OUTPUT_DIR/macos-lite-${VARIANT}-amd64-${DATESTAMP}.iso"
 echo "SHA256:    $OUTPUT_DIR/macos-lite-${VARIANT}-amd64-${DATESTAMP}.iso.sha256"
 echo "Size:      $(du -h "$OUTPUT_DIR/macos-lite-${VARIANT}-amd64-${DATESTAMP}.iso" | cut -f1)"
-
-if [ "$VARIANT" = "nonfree-firmware" ] && [ -f "$CONFIG_DIR/archives/debian.list.chroot.bak" ]; then
-    mv "$CONFIG_DIR/archives/debian.list.chroot.bak" "$CONFIG_DIR/archives/debian.list.chroot"
-fi
