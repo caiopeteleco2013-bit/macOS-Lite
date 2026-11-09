@@ -1,4 +1,4 @@
-name: Build macOS-Lite ISO (apt test)
+name: Build macOS-Lite ISO (network test)
 
 on:
   push:
@@ -11,14 +11,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Test apt-get update
+      - name: Test curl to Debian
         run: |
-          echo "=== apt-get update ==="
-          apt-get update
-          echo "UPDATE_EXIT_CODE: $?"
-
-      - name: Test wget
-        run: |
-          echo "=== wget test ==="
-          wget -q --spider http://archive.ubuntu.com/ubuntu/dists/noble/Release
-          echo "WGET_EXIT_CODE: $?"
+          echo "=== curl deb.debian.org ==="
+          curl -sI --max-time 10 http://deb.debian.org/debian/dists/bookworm/Release 2>&1 || echo "CURL DEBIAN FAILED"
+          echo "=== curl ubuntu ==="
+          curl -sI --max-time 10 http://archive.ubuntu.com/ubuntu/dists/noble/Release 2>&1 || echo "CURL UBUNTU FAILED"
