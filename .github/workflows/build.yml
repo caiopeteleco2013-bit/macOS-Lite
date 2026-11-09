@@ -1,0 +1,34 @@
+name: Build macOS-Lite ISO
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [ default, nonfree-firmware ]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build ISO
+        run: |
+          chmod +x scripts/build-iso.sh
+          ./scripts/build-iso.sh "${{ matrix.variant }}"
+
+      - name: Upload artifacts
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts-${{ matrix.variant }}
+          path: |
+            build/image/
