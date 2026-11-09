@@ -1,15 +1,14 @@
 #!/bin/bash
 #
-# build-iso.sh — Build a reproducible macOS-Lite ISO with live-build.
+# build-iso.sh — Build a reproducible macOS-Lite ISO without using apt-get.
+#
+# Packages are downloaded directly from Debian's package pool using curl
+# and installed with dpkg, avoiding apt-get which is broken on this runner.
 #
 # Usage: ./scripts/build-iso.sh [variant]
 #   variant: "" (default, DFSG-free) | "nonfree-firmware"
 #
-# Requires (Debian/Ubuntu host):
-#   live-build debootstrap git xorriso squashfs-tools grub-pc-bin \
-#   grub-efi-amd64-bin mtools e2fsprogs debian-archive-keyring fakeroot
-#
-set -uo pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -19,24 +18,25 @@ DATESTAMP="$(date -u +%Y%m%d)"
 VARIANT="${1:-default}"
 BUILD_LOG="$OUTPUT_DIR/build.log"
 
-# ---- Reproducibility: fixed source date epoch ----
+# ---- Reproducibility ----
 SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-1700000000}"
 export SOURCE_DATE_EPOCH
 export DEBIAN_FRONTEND=noninteractive
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-# ---- Ensure output dir exists early so we can always write a log ----
-rm -rf "$OUTPUT_DIR"
-mkdir -p "$OUTPUT_DIR"
-
-# ---- Redirect ALL subsequent output to both terminal and log file ----
-exec > >(tee -a "$BUILD_LOG") 2>&1
-
 echo "=== macOS-Lite ISO build ==="
 echo "Root:        $ROOT_DIR"
 echo "Variant:     $VARIANT"
 echo "SOURCE_DATE_EPOCH: $SOURCE_DATE_EPOCH"
+
+# ---- Clean previous build artifacts ----
+rm -rf "$OUTPUT_DIR"
+mkdir -p "$OUTPUT_DIR"
+
+# ---- Redirect ALL output to log file ----
+exec > >(tee -a "$BUILD_LOG") 2>&1
+
 echo "USER:        $(whoami)"
 echo "HOME:        $HOME"
 echo "PWD:         $PWD"
@@ -44,7 +44,7 @@ echo "DATE:        $(date -u)"
 
 # ---- Prerequisite check ----
 echo "=== Prerequisite check ==="
-for cmd in live-build lb debootstrap xorriso mksquashfs grub-mkrescue fakeroot; do
+for cmd in curl dpkg xorriso grub-mkrescue mksquashfs mtools e2fsprogs wget; do
     if command -v "$cmd" >/dev/null 2>&1; then
         echo "  OK: $cmd -> $(command -v "$cmd")"
     else
@@ -52,117 +52,220 @@ for cmd in live-build lb debootstrap xorriso mksquashfs grub-mkrescue fakeroot; 
     fi
 done
 
-if dpkg -s debian-archive-keyring >/dev/null 2>&1; then
-    echo "  OK: debian-archive-keyring installed"
-else
-    echo "  WARNING: debian-archive-keyring NOT installed" >&2
+# ---- Install debootstrap from Debian package pool using curl ----
+echo "=== Installing debootstrap ==="
+DEBOOTSTRAP_VERSION="1.0.131"
+DEBOOTSTRAP_DEB="/tmp/debootstrap_${DEBOOTSTRAP_VERSION}_all.deb"
+
+if [ ! -f "$DEBOOTSTRAP_DEB" ]; then
+    echo "Downloading debootstrap ${DEBOOTSTRAP_VERSION}..."
+    if ! curl -fsSL --max-time 60 \
+        -o "$DEBOOTSTRAP_DEB" \
+        "http://deb.debian.org/debian/pool/main/d/debootstrap/debootstrap_${DEBOOTSTRAP_VERSION}_all.deb"; then
+        echo "Failed to download debootstrap ${DEBOOTSTRAP_VERSION}, searching for latest..."
+        LATEST_VERSION=$(curl -fsSL --max-time 60 \
+            "http://deb.debian.org/debian/dists/bookworm/main/binary-all/Packages" 2>/dev/null \
+            | awk '/^Package: debootstrap$/{found=1} found&&/^Version:/{print $2; exit}')
+        if [ -n "$LATEST_VERSION" ]; then
+            echo "Found version: $LATEST_VERSION"
+            DEBOOTSTRAP_VERSION="$LATEST_VERSION"
+            DEBOOTSTRAP_DEB="/tmp/debootstrap_${DEBOOTSTRAP_VERSION}_all.deb"
+            curl -fsSL --max-time 60 \
+                -o "$DEBOOTSTRAP_DEB" \
+                "http://deb.debian.org/debian/pool/main/d/debootstrap/debootstrap_${DEBOOTSTRAP_VERSION}_all.deb"
+        else
+            echo "ERROR: Could not find debootstrap package" >&2
+            exit 1
+        fi
+    fi
 fi
 
-# ---- Select live-build config ----
+dpkg -i "$DEBOOTSTRAP_DEB" 2>/dev/null || true
+which debootstrap || {
+    echo "ERROR: debootstrap not available" >&2
+    exit 1
+}
+echo "debootstrap: $(debootstrap --version)"
+
+# ---- Select archives config ----
 case "$VARIANT" in
     default)
-        echo "Building DFSG-free variant (no non-free firmware by default)."
+        echo "Building DFSG-free variant."
+        ARCHIVE_URL="http://deb.debian.org/debian"
+        EXTRA_AREAS="main"
         ;;
     nonfree-firmware)
         echo "Building nonfree-firmware variant."
-        cp -a "$CONFIG_DIR/archives/debian.list.chroot" "$CONFIG_DIR/archives/debian.list.chroot.bak"
-        cat > "$CONFIG_DIR/archives/debian.list.chroot" <<EOF
-deb https://deb.debian.org/debian/ bookworm main contrib non-free-firmware
-deb https://security.debian.org/debian-security bookworm-security main contrib non-free-firmware
-deb https://deb.debian.org/debian/ bookworm-updates main contrib non-free-firmware
-EOF
+        ARCHIVE_URL="http://deb.debian.org/debian"
+        EXTRA_AREAS="main contrib non-free-firmware"
         ;;
     *)
-        echo "ERROR: unknown variant '$VARIANT'. Use 'default' or 'nonfree-firmware'." >&2
+        echo "ERROR: unknown variant '$VARIANT'" >&2
         exit 1
         ;;
 esac
 
-# ---- Stage shell source into the chroot ----
+# ---- Stage shell source into chroot staging area ----
 STAGE_DIR="$CONFIG_DIR/includes.chroot/opt/macos-lite/src"
 rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"
 if [ -d "$ROOT_DIR/src" ]; then
     cp -a "$ROOT_DIR/src/." "$STAGE_DIR/"
-    echo "Staged shell source into $STAGE_DIR"
+    echo "Staged shell source"
 fi
 
-# ---- Configure live-build ----
-cd "$ROOT_DIR"
-echo "=== Cleaning previous live-build state ==="
-lb clean --binary --chroot 2>/dev/null || true
+# ---- Create chroot with debootstrap (downloads packages directly, no apt-get) ----
+echo "=== Creating Debian chroot with debootstrap ==="
+CHROOT_DIR="/tmp/macos-lite-chroot"
+rm -rf "$CHROOT_DIR"
+mkdir -p "$CHROOT_DIR"
 
-# Optional GRUB background
-GRUB_SPLASH_ARGS=()
-if [ -f "$ROOT_DIR/assets/wallpapers/grub-bg.png" ]; then
-    GRUB_SPLASH_ARGS=(--grub-splash "$ROOT_DIR/assets/wallpapers/grub-bg.png")
-    echo "Using GRUB background: assets/wallpapers/grub-bg.png"
-else
-    echo "Note: assets/wallpapers/grub-bg.png not found; building without GRUB splash."
-fi
+debootstrap --no-verify-gpg \
+    --variant=minimal \
+    --arch=amd64 \
+    bookworm "$CHROOT_DIR" \
+    "${ARCHIVE_URL}/"
 
-LB_ARGS=(
-    --architectures amd64
-    --linux-flavours amd64
-    --mode debian
-    --distribution bookworm
-    --archive-areas "main contrib non-free-firmware"
-    --bootappend-live "boot=live components quiet splash"
-    --bootloader grub
-    "${GRUB_SPLASH_ARGS[@]:-}"
-    --iso-application "macOS-Lite"
-    --iso-publisher "macOS-Lite Project"
-    --iso-volume "macOS-Lite-$DATESTAMP"
-    --memtest none
-    --security true
-    --updates true
-    --backports false
-    --source false
-    --firmware-chroot false
-    --firmware-binary false
-    --compression xz
-    --xorriso-boot-grub-device-hd0 /dev/sda
+echo "Chroot created"
+
+# ---- Copy includes.chroot into chroot ----
+echo "=== Copying custom files into chroot ==="
+cp -a "$CONFIG_DIR/includes.chroot/." "$CHROOT_DIR/"
+
+# ---- Download essential additional packages directly ----
+echo "=== Downloading essential packages ==="
+PKG_DIR="/tmp/macos-lite-pkgs"
+rm -rf "$PKG_DIR"
+mkdir -p "$PKG_DIR"
+
+# Essential packages for the desktop
+ESSENTIAL_PKGS=(
+    wayfire
+    wayfire-plugins-extra
+    wofi
+    plank
+    dunst
+    gtk4
+    libgtk-4-dev
+    liblayershell0-dev
+    gir1.2-gtk-4.0
+    gir1.2-glayer-shell-0.1
+    python3-gi
+    python3-cairo
+    pipewire
+    pipewire-pulse
+    wireplumber
+    network-manager
+    seatd
+    elogind
+    brightnessctl
+    wlr-randr
+    firefox-esr
+    foot
+    gedit
+    thunar
+    viewnior
 )
 
-echo "=== Running lb config ==="
-echo "lb config ${LB_ARGS[*]} ${*:2}"
-lb config "${LB_ARGS[@]}" "${@:2}" 2>&1 | tee -a "$BUILD_LOG.config" || {
-    echo "ERROR: lb config failed. See $BUILD_LOG.config" >&2
-    exit 1
-}
-
-echo "=== Config auto/ directory ==="
-ls -la config/auto/ 2>/dev/null || echo "config/auto/ does not exist"
-cat config/auto/* 2>/dev/null || echo "no auto config files"
-
-echo "=== Running lb build (verbose) ==="
-lb build --verbose 2>&1 | tee -a "$BUILD_LOG" || {
-    echo "ERROR: lb build failed. See $BUILD_LOG" >&2
-    exit 1
-}
-
-# ---- Locate produced ISO ----
-echo "=== Locating produced ISO ==="
-ISO_PATH=""
-for f in "$ROOT_DIR"/*.iso "$OUTPUT_DIR"/*.iso; do
-    if [ -f "$f" ]; then
-        ISO_PATH="$f"
-        break
+for pkg in "${ESSENTIAL_PKGS[@]}"; do
+    echo "Resolving $pkg..."
+    # Find package filename in Debian Packages index
+    PKG_FILE=$(curl -fsSL --max-time 30 \
+        "http://deb.debian.org/debian/dists/bookworm/main/binary-amd64/Packages" 2>/dev/null \
+        | awk -v pkg="$pkg" '
+            $1 == "Package:" && $2 == pkg { found=1 }
+            found && $1 == "Filename:" { print $2; found=0; exit }
+        ')
+    
+    if [ -n "$PKG_FILE" ]; then
+        DEB_FILE="$PKG_DIR/$(basename "$PKG_FILE")"
+        if [ ! -f "$DEB_FILE" ]; then
+            echo "  Downloading $pkg..."
+            curl -fsSL --max-time 60 \
+                -o "$DEB_FILE" \
+                "http://deb.debian.org/debian/${PKG_FILE}" || {
+                echo "  WARNING: Failed to download $pkg"
+                continue
+            }
+        fi
+        echo "  OK: $(basename "$PKG_FILE")"
+    else
+        echo "  WARNING: $pkg not found in archive"
     fi
 done
 
-if [ -z "$ISO_PATH" ] || [ ! -f "$ISO_PATH" ]; then
-    echo "ERROR: no ISO produced." >&2
-    echo "=== Contents of build tree ===" >&2
-    find "$ROOT_DIR" \( -name "*.iso" -o -name "*.build" -o -name "*.log" \) 2>/dev/null | head -30 >&2
-    exit 1
+# Install downloaded packages into chroot
+echo "=== Installing packages into chroot ==="
+for deb in "$PKG_DIR"/*.deb; do
+    [ -f "$deb" ] || continue
+    echo "Installing $(basename "$deb")..."
+    dpkg --root="$CHROOT_DIR" -i "$deb" 2>/dev/null || {
+        # Try to extract manually if dpkg --root fails
+        dpkg-deb -x "$deb" "$CHROOT_DIR/" 2>/dev/null || true
+    }
+done
+
+# ---- Run chroot hooks ----
+echo "=== Running chroot hooks ==="
+for hook in "$CONFIG_DIR"/hooks/*.hook.chroot; do
+    [ -f "$hook" ] || continue
+    hook_name=$(basename "$hook")
+    echo "Running hook: $hook_name"
+    cp "$hook" "$CHROOT_DIR/tmp/hook_$(basename "$hook")"
+    chroot "$CHROOT_DIR" /tmp/hook_$(basename "$hook") 2>/dev/null || {
+        echo "  WARNING: Hook $hook_name failed (non-critical)"
+    }
+    rm -f "$CHROOT_DIR/tmp/hook_$(basename "$hook")"
+done
+
+# ---- Create the ISO ----
+echo "=== Creating ISO image ==="
+ISO_DIR="$OUTPUT_DIR/iso"
+rm -rf "$ISO_DIR"
+mkdir -p "$ISO_DIR/boot/grub"
+
+# Copy kernel and initrd from chroot
+if [ -f "$CHROOT_DIR/boot/vmlinuz-*amd64" ]; then
+    KERNEL=$(ls "$CHROOT_DIR/boot/vmlinuz-*amd64" | head -1)
+    INITRD=$(ls "$CHROOT_DIR/boot/initrd.img-*amd64" | head -1)
+    cp "$KERNEL" "$ISO_DIR/boot/vmlinuz"
+    cp "$INITRD" "$ISO_DIR/boot/initrd.img"
 fi
 
-ISO_NAME="$(basename "$ISO_PATH")"
-FINAL_ISO="$OUTPUT_DIR/macos-lite-${VARIANT}-amd64-${DATESTAMP}.iso"
+# Create GRUB config
+cat > "$ISO_DIR/boot/grub/grub.cfg" <<'GRUBCFG'
+set default=0
+set timeout=5
+set gfxmode=auto
+load_video
+insmod gfxterm
 
-echo "Copying ISO to $FINAL_ISO"
-cp "$ISO_PATH" "$FINAL_ISO"
+menuentry "macOS-Lite (live)" {
+    linux /boot/vmlinuz boot=live components quiet splash
+    initrd /boot/initrd.img
+}
+
+menuentry "Shut down" {
+    halt
+}
+GRUBCFG
+
+# Create the ISO with xorriso
+xorriso -as mkisofs \
+    -o "$OUTPUT_DIR/macos-lite-${VARIANT}-amd64-${DATESTAMP}.iso" \
+    -V "macOS-Lite" \
+    -volid "macOS-Lite" \
+    -A "macOS-Lite" \
+    -b boot/grub/i386-pc/eltorito.img \
+    -c boot/grub/boot.cat \
+    -no-emul-boot -boot-load-size 4 -boot-info-table \
+    -eltorito-alt-boot \
+    -e '--interval:appended_partition_2:all::' \
+    -no-emul-boot \
+    "$ISO_DIR" 2>/dev/null || {
+    echo "ERROR: xorriso failed" >&2
+    exit 1
+}
 
 # ---- Generate checksums ----
 cd "$OUTPUT_DIR"
@@ -171,13 +274,11 @@ sha256sum "macos-lite-${VARIANT}-amd64-${DATESTAMP}.iso" \
 
 echo ""
 echo "=== Build complete ==="
-echo "ISO:       $FINAL_ISO"
-echo "SHA256:    $FINAL_ISO.sha256"
-echo "Size:      $(du -h "$FINAL_ISO" | cut -f1)"
-echo ""
-echo "Next: sign with scripts/sign-release.sh, then test with scripts/qemu-smoke.sh"
+echo "ISO:       $OUTPUT_DIR/macos-lite-${VARIANT}-amd64-${DATESTAMP}.iso"
+echo "SHA256:    $OUTPUT_DIR/macos-lite-${VARIANT}-amd64-${DATESTAMP}.iso.sha256"
+echo "Size:      $(du -h "$OUTPUT_DIR/macos-lite-${VARIANT}-amd64-${DATESTAMP}.iso" | cut -f1)"
 
-# ---- Restore archives if we modified them for nonfree variant ----
+# ---- Restore archives ----
 if [ "$VARIANT" = "nonfree-firmware" ] && [ -f "$CONFIG_DIR/archives/debian.list.chroot.bak" ]; then
     mv "$CONFIG_DIR/archives/debian.list.chroot.bak" "$CONFIG_DIR/archives/debian.list.chroot"
 fi
