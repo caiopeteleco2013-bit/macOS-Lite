@@ -9,7 +9,7 @@
 #   live-build debootstrap git xorriso squashfs-tools grub-pc-bin \
 #   grub-efi-amd64-bin mtools e2fsprogs debian-archive-keyring fakeroot
 #
-set -euo pipefail
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -30,15 +30,26 @@ echo "=== macOS-Lite ISO build ==="
 echo "Root:        $ROOT_DIR"
 echo "Variant:     $VARIANT"
 echo "SOURCE_DATE_EPOCH: $SOURCE_DATE_EPOCH"
+echo "USER:        $(whoami)"
+echo "HOME:        $HOME"
+echo "PWD:         $PWD"
 
 # ---- Prerequisite check ----
-for cmd in live-build lb debootstrap xorriso mksquashfs grub-mkrescue; do
-    if ! command -v "$cmd" >/dev/null 2>&1; then
-        echo "ERROR: required command not found: $cmd" >&2
-        echo "Install: sudo apt-get install live-build debootstrap xorriso squashfs-tools grub-pc-bin grub-efi-amd64-bin mtools e2fsprogs debian-archive-keyring fakeroot" >&2
-        exit 1
+echo "=== Prerequisite check ==="
+for cmd in live-build lb debootstrap xorriso mksquashfs grub-mkrescue fakeroot; do
+    if command -v "$cmd" >/dev/null 2>&1; then
+        echo "  OK: $cmd -> $(command -v "$cmd")"
+    else
+        echo "  MISSING: $cmd" >&2
     fi
 done
+
+# Check debian-archive-keyring (needed by debootstrap)
+if dpkg -s debian-archive-keyring >/dev/null 2>&1; then
+    echo "  OK: debian-archive-keyring installed"
+else
+    echo "  WARNING: debian-archive-keyring NOT installed" >&2
+fi
 
 # ---- Clean previous build artifacts ----
 rm -rf "$OUTPUT_DIR"
@@ -64,7 +75,7 @@ EOF
         ;;
 esac
 
-# ---- Stage shell source into the chroot (so hooks can install it) ----
+# ---- Stage shell source into the chroot ----
 STAGE_DIR="$CONFIG_DIR/includes.chroot/opt/macos-lite/src"
 rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"
@@ -75,9 +86,10 @@ fi
 
 # ---- Configure live-build ----
 cd "$ROOT_DIR"
+echo "=== Cleaning previous live-build state ==="
 lb clean --binary --chroot 2>/dev/null || true
 
-# Optional GRUB background: only pass --grub-splash if the file exists.
+# Optional GRUB background
 GRUB_SPLASH_ARGS=()
 if [ -f "$ROOT_DIR/assets/wallpapers/grub-bg.png" ]; then
     GRUB_SPLASH_ARGS=(--grub-splash "$ROOT_DIR/assets/wallpapers/grub-bg.png")
@@ -110,19 +122,27 @@ LB_ARGS=(
 )
 
 echo "=== Running lb config ==="
+echo "lb config ${LB_ARGS[*]} ${*:2}"
 lb config "${LB_ARGS[@]}" "${@:2}" 2>&1 | tee "$BUILD_LOG.config" || {
     echo "ERROR: lb config failed. See $BUILD_LOG.config" >&2
     exit 1
 }
 
-# ---- Build the ISO ----
-echo "=== Running lb build ==="
-lb build 2>&1 | tee "$BUILD_LOG" || {
+echo "=== Config auto/ directory ==="
+ls -la config/auto/ 2>/dev/null || echo "config/auto/ does not exist"
+cat config/auto/* 2>/dev/null || echo "no auto config files"
+
+echo "=== Running lb build (verbose) ==="
+set -x
+lb build --verbose 2>&1 | tee "$BUILD_LOG" || {
+    set +x
     echo "ERROR: lb build failed. See $BUILD_LOG" >&2
     exit 1
 }
+set +x
 
 # ---- Locate produced ISO ----
+echo "=== Locating produced ISO ==="
 ISO_PATH=""
 for f in "$ROOT_DIR"/*.iso "$OUTPUT_DIR"/*.iso; do
     if [ -f "$f" ]; then
@@ -133,6 +153,8 @@ done
 
 if [ -z "$ISO_PATH" ] || [ ! -f "$ISO_PATH" ]; then
     echo "ERROR: no ISO produced." >&2
+    echo "=== Contents of build tree ===" >&2
+    find "$ROOT_DIR" -name "*.iso" -o -name "*.build" -o -name "*.log" 2>/dev/null | head -20 >&2
     exit 1
 fi
 
