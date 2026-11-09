@@ -61,7 +61,7 @@ jobs:
             live-build debootstrap git xorriso squashfs-tools \
             grub-pc-bin grub-efi-amd64-bin mtools e2fsprogs \
             gnupg gnupg2 qemu-system-x86 qemu-utils socat \
-            ca-certificates curl xz-utils file
+            ca-certificates curl xz-utils file debian-archive-keyring fakeroot
 
       - name: Restore apt cache
         id: cache-apt

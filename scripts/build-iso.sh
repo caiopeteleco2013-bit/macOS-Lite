@@ -7,7 +7,7 @@
 #
 # Requires (Debian/Ubuntu host):
 #   live-build debootstrap git xorriso squashfs-tools grub-pc-bin \
-#   grub-efi-amd64-bin mtools e2fsprogs
+#   grub-efi-amd64-bin mtools e2fsprogs debian-archive-keyring fakeroot
 #
 set -euo pipefail
 
@@ -17,9 +17,9 @@ CONFIG_DIR="$ROOT_DIR/config"
 OUTPUT_DIR="$ROOT_DIR/build/image"
 DATESTAMP="$(date -u +%Y%m%d)"
 VARIANT="${1:-default}"
+BUILD_LOG="$OUTPUT_DIR/build.log"
 
 # ---- Reproducibility: fixed source date epoch ----
-# Use the release tag date if available, otherwise a fixed point.
 SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-1700000000}"
 export SOURCE_DATE_EPOCH
 export DEBIAN_FRONTEND=noninteractive
@@ -35,7 +35,7 @@ echo "SOURCE_DATE_EPOCH: $SOURCE_DATE_EPOCH"
 for cmd in live-build lb debootstrap xorriso mksquashfs grub-mkrescue; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         echo "ERROR: required command not found: $cmd" >&2
-        echo "Install: sudo apt-get install live-build debootstrap xorriso squashfs-tools grub-pc-bin grub-efi-amd64-bin mtools e2fsprogs" >&2
+        echo "Install: sudo apt-get install live-build debootstrap xorriso squashfs-tools grub-pc-bin grub-efi-amd64-bin mtools e2fsprogs debian-archive-keyring fakeroot" >&2
         exit 1
     fi
 done
@@ -45,8 +45,6 @@ rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
 
 # ---- Select live-build config ----
-# Default config is DFSG-free (no non-free firmware). The nonfree variant adds
-# firmware archives for Wi-Fi/GPU out-of-the-box support.
 case "$VARIANT" in
     default)
         echo "Building DFSG-free variant (no non-free firmware by default)."
@@ -111,11 +109,18 @@ LB_ARGS=(
     --xorriso-boot-grub-device-hd0 /dev/sda
 )
 
-lb config "${LB_ARGS[@]}" "${@:2}"
+echo "=== Running lb config ==="
+lb config "${LB_ARGS[@]}" "${@:2}" 2>&1 | tee "$BUILD_LOG.config" || {
+    echo "ERROR: lb config failed. See $BUILD_LOG.config" >&2
+    exit 1
+}
 
 # ---- Build the ISO ----
-echo "Building live image (this may take a while)..."
-lb build
+echo "=== Running lb build ==="
+lb build 2>&1 | tee "$BUILD_LOG" || {
+    echo "ERROR: lb build failed. See $BUILD_LOG" >&2
+    exit 1
+}
 
 # ---- Locate produced ISO ----
 ISO_PATH=""
