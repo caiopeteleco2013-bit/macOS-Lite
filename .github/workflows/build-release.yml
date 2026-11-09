@@ -104,6 +104,7 @@ jobs:
 
       - name: Save build logs
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: build-logs-${{ matrix.variant }}
