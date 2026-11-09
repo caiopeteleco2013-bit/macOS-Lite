@@ -105,14 +105,12 @@ jobs:
             build/image/*.sha256
             build/image/*.build
             build/image/*.log
-        retention-days: 7
 
       - name: Save ISO (unsigned, interim)
         uses: actions/upload-artifact@v4
         with:
           name: macos-lite-unsigned-${{ matrix.variant }}-${{ matrix.architecture }}
           path: build/image/macos-lite-${{ matrix.variant }}-amd64-*.iso
-        retention-days: 7
 
   # ------------------------------------------------------------------
   # Sign the ISO (GPG) — runs on tag pushes only (releases)
@@ -182,7 +180,6 @@ jobs:
             build/image/*.iso.sha256
             build/image/*.iso.sha256.sig
             build/image/*.iso.sig
-        retention-days: 30
 
   # ------------------------------------------------------------------
   # QEMU smoke test — runs on every build (PRs too)
@@ -227,7 +224,6 @@ jobs:
         with:
           name: smoke-result-${{ matrix.variant }}
           path: smoke-result-*.json
-        retention-days: 7
 
       - name: Fail on smoke test failure
         if: failure()
