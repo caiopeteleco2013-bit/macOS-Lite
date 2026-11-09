@@ -1,0 +1,17 @@
+name: Build macOS-Lite ISO (container test)
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: debian:bookworm
+    steps:
+      - name: Install live-build in container
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends live-build debootstrap 2>&1 || echo "INSTALL FAILED"
+          which lb || echo "lb not found"
+          lb --version 2>&1 || echo "lb version failed"
