@@ -1,13 +1,13 @@
 #!/bin/bash
 #
 # build-iso.sh — Build a reproducible macOS-Lite ISO.
-# Downloads .deb packages directly from Debian's package pool using curl.
+# Downloads .deb packages directly from Debian's package pool using curl
+# and installs them with dpkg. Creates the chroot with debootstrap.
 #
 # Usage: ./scripts/build-iso.sh [variant]
 #   variant: "" (default, DFSG-free) | "nonfree-firmware"
 #
-
-set -uo pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -43,7 +43,8 @@ for cmd in curl dpkg xorriso grub-mkrescue mksquashfs mtools wget gpg; do
     if command -v "$cmd" >/dev/null 2>&1; then
         echo "  OK: $cmd -> $(command -v "$cmd")"
     else
-        echo "  MISSING: $cmd"
+        echo "  MISSING: $cmd" >&2
+        exit 1
     fi
 done
 
@@ -60,18 +61,17 @@ if [ -z "$LATEST_VER" ]; then
 fi
 echo "Target debootstrap version: $LATEST_VER"
 
-if curl -fsSL --max-time 60 \
+if ! curl -fsSL --max-time 60 \
     -o "$DEBOOTSTRAP_DEB" \
     "http://deb.debian.org/debian/pool/main/d/debootstrap/debootstrap_${LATEST_VER}_all.deb"; then
-    echo "Downloaded debootstrap ${LATEST_VER}"
-    dpkg -i "$DEBOOTSTRAP_DEB" 2>/dev/null || {
-        echo "dpkg -i had issues, trying --configure..."
-        dpkg --configure -a 2>/dev/null || true
-    }
-else
     echo "ERROR: Failed to download debootstrap" >&2
     exit 1
 fi
+
+dpkg -i "$DEBOOTSTRAP_DEB" 2>/dev/null || {
+    echo "dpkg -i had issues, trying --configure..."
+    dpkg --configure -a 2>/dev/null || true
+}
 
 which debootstrap || {
     echo "ERROR: debootstrap not available" >&2
@@ -95,7 +95,7 @@ case "$VARIANT" in
         ;;
 esac
 
-# ---- Stage shell source ----
+# ---- Stage shell source into chroot staging area ----
 STAGE_DIR="$CONFIG_DIR/includes.chroot/opt/macos-lite/src"
 rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"
@@ -104,7 +104,7 @@ if [ -d "$ROOT_DIR/src" ]; then
     echo "Staged shell source"
 fi
 
-# ---- Create chroot ----
+# ---- Create chroot with debootstrap ----
 echo "=== Creating Debian chroot with debootstrap ==="
 CHROOT_DIR="/tmp/macos-lite-chroot"
 rm -rf "$CHROOT_DIR"
@@ -120,11 +120,18 @@ debootstrap --no-verify-gpg \
 }
 echo "Chroot created at $CHROOT_DIR"
 
-# ---- Copy includes.chroot ----
+# ---- Verify chroot has basic structure ----
+if [ ! -f "$CHROOT_DIR/bin/bash" ]; then
+    echo "ERROR: Chroot missing /bin/bash - debootstrap failed" >&2
+    exit 1
+fi
+echo "Chroot base system OK"
+
+# ---- Copy includes.chroot into chroot ----
 echo "=== Copying custom files into chroot ==="
 cp -a "$CONFIG_DIR/includes.chroot/." "$CHROOT_DIR/"
 
-# ---- Download essential packages ----
+# ---- Download essential packages directly from Debian pool ----
 echo "=== Downloading essential packages ==="
 PKG_DIR="/tmp/macos-lite-pkgs"
 rm -rf "$PKG_DIR"
@@ -134,6 +141,9 @@ ESSENTIAL_PKGS=(
     wayfire plank dunst wofi pipewire pipewire-pulse wireplumber
     network-manager seatd elogind brightnessctl wlr-randr
     firefox-esr foot gedit thunar viewnior
+    linux-image-amd64
+    grub-pc grub-efi-amd64
+    e2fsprogs dosfstools
 )
 
 for pkg in "${ESSENTIAL_PKGS[@]}"; do
@@ -159,20 +169,50 @@ for pkg in "${ESSENTIAL_PKGS[@]}"; do
             echo "  OK (cached): $(basename "$PKG_FILE")"
         fi
     else
-        echo "  WARNING: $pkg not found"
+        echo "  WARNING: $pkg not found in main archive, trying contrib/non-free..."
+        PKG_FILE=$(curl -fsSL --max-time 30 \
+            "http://deb.debian.org/debian/dists/bookworm/contrib/binary-amd64/Packages" 2>/dev/null \
+            | awk -v p="$pkg" '
+                $1=="Package:" && $2==p {f=1}
+                f && $1=="Filename:" {print $2; f=0; exit}
+            ')
+        if [ -n "$PKG_FILE" ]; then
+            DEB_FILE="$PKG_DIR/$(basename "$PKG_FILE")"
+            if [ ! -f "$DEB_FILE" ]; then
+                if curl -fsSL --max-time 60 \
+                    -o "$DEB_FILE" \
+                    "http://deb.debian.org/debian/${PKG_FILE}"; then
+                    echo "  OK: $(basename "$PKG_FILE")"
+                else
+                    echo "  WARNING: Failed to download $pkg"
+                    continue
+                fi
+            else
+                echo "  OK (cached): $(basename "$PKG_FILE")"
+            fi
+        else
+            echo "  WARNING: $pkg not found anywhere"
+        fi
     fi
 done
 
-# Install packages into chroot
+# Install downloaded packages into chroot
 echo "=== Installing packages into chroot ==="
 for deb in "$PKG_DIR"/*.deb; do
     [ -f "$deb" ] || continue
-    echo "Installing $(basename "$deb")..."
+    echo "Installing $(basename "$deb") into chroot..."
     dpkg --root="$CHROOT_DIR" -i "$deb" 2>/dev/null || {
         echo "  dpkg --root failed, extracting manually..."
         dpkg-deb -x "$deb" "$CHROOT_DIR/" 2>/dev/null || true
     }
 done
+
+# ---- Verify kernel exists in chroot ----
+if [ ! -f "$CHROOT_DIR/boot/vmlinuz-*amd64" ]; then
+    echo "ERROR: No kernel found in chroot - ISO will not boot" >&2
+    exit 1
+fi
+echo "Kernel found in chroot"
 
 # ---- Run chroot hooks ----
 echo "=== Running chroot hooks ==="
@@ -193,15 +233,16 @@ ISO_DIR="$OUTPUT_DIR/iso"
 rm -rf "$ISO_DIR"
 mkdir -p "$ISO_DIR/boot/grub"
 
-KERNEL=$(ls "$CHROOT_DIR/boot/vmlinuz-*amd64" 2>/dev/null | head -1)
-INITRD=$(ls "$CHROOT_DIR/boot/initrd.img-*amd64" 2>/dev/null | head -1)
+KERNEL=$(ls "$CHROOT_DIR/boot/vmlinuz-*amd64" | head -1)
+INITRD=$(ls "$CHROOT_DIR/boot/initrd.img-*amd64" | head -1)
 if [ -n "$KERNEL" ] && [ -n "$INITRD" ]; then
     cp "$KERNEL" "$ISO_DIR/boot/vmlinuz"
     cp "$INITRD" "$ISO_DIR/boot/initrd.img"
     echo "Kernel: $(basename "$KERNEL")"
     echo "Initrd: $(basename "$INITRD")"
 else
-    echo "WARNING: No kernel/initrd found in chroot"
+    echo "ERROR: No kernel/initrd found in chroot" >&2
+    exit 1
 fi
 
 cat > "$ISO_DIR/boot/grub/grub.cfg" <<'GRUBCFG'
@@ -229,10 +270,25 @@ xorriso -as mkisofs \
     -b boot/grub/i386-pc/eltorito.img \
     -c boot/grub/boot.cat \
     -no-emul-boot -boot-load-size 4 -boot-info-table \
-    "$ISO_DIR" 2>/dev/null || {
+    "$ISO_DIR" || {
     echo "ERROR: xorriso failed" >&2
     exit 1
 }
+
+# ---- Verify ISO was created ----
+ISO_FILE="$OUTPUT_DIR/macos-lite-${VARIANT}-amd64-${DATESTAMP}.iso"
+if [ ! -f "$ISO_FILE" ]; then
+    echo "ERROR: ISO file was not created" >&2
+    exit 1
+fi
+
+ISO_SIZE=$(du -b "$ISO_FILE" | cut -f1)
+echo "ISO size: $ISO_SIZE bytes"
+
+if [ "$ISO_SIZE" -lt 1000000 ]; then
+    echo "ERROR: ISO too small ($ISO_SIZE bytes) - likely invalid" >&2
+    exit 1
+fi
 
 # ---- Generate checksums ----
 cd "$OUTPUT_DIR"
