@@ -1,0 +1,28 @@
+#!/bin/sh
+# live-build chroot hook: shrink the image by removing unneeded locales/docs.
+# Keeps the ISO under the ~1.2 GB target.
+
+set -e
+
+# Remove docs/man/locale we don't ship to users (keep essential man pages minimal)
+rm -rf /usr/share/doc/*/examples 2>/dev/null || true
+rm -rf /usr/share/doc/*/html 2>/dev/null || true
+rm -rf /usr/share/man/??_* 2>/dev/null || true
+rm -rf /usr/share/man/??_*.* 2>/dev/null || true
+# Keep only en_US locale to save space
+find /usr/share/locale -mindepth 1 -maxdepth 1 ! -name 'en*' ! -name 'en_US*' -exec rm -rf {} + 2>/dev/null || true
+find /usr/share/i18n/locales -type f ! -name 'en_US*' -delete 2>/dev/null || true
+
+# Clean apt cache
+apt-get clean 2>/dev/null || true
+rm -rf /var/lib/apt/lists/* 2>/dev/null || true
+rm -rf /var/cache/apt/archives/*.deb 2>/dev/null || true
+
+# Remove temporary build artifacts
+rm -rf /tmp/* 2>/dev/null || true
+rm -rf /root/.cache 2>/dev/null || true
+rm -f /etc/machine-id 2>/dev/null || true
+rm -f /var/lib/dbus/machine-id 2>/dev/null || true
+touch /etc/machine-id
+
+echo "[0300-image-cleanup] done"

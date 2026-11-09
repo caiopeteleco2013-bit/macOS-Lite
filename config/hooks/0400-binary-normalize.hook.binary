@@ -1,0 +1,16 @@
+#!/bin/sh
+# live-build binary hook: normalize the binary tree for reproducibility.
+# Runs in the binary staging area before ISO creation.
+
+set -e
+
+# Deterministic file mtimes for files under the binary tree
+find . -type f -exec touch -d "@${SOURCE_DATE_EPOCH:-1700000000}" {} + 2>/dev/null || true
+find . -type d -exec touch -d "@${SOURCE_DATE_EPOCH:-1700000000}" {} + 2>/dev/null || true
+
+# Remove any leftover build stamps
+rm -rf .disk/* 2>/dev/null || true
+mkdir -p .disk
+echo "macOS-Lite $(date -u +%Y-%m-%d)" > .disk/info
+
+echo "[0400-binary-normalize] done"

@@ -1,0 +1,26 @@
+# Build outputs
+build/
+*.iso
+*.iso.sha256
+*.iso.sig
+*.sha256.sig
+smoke-result.json
+smoke-result-*.json
+
+# live-build generated
+config/auto/
+config/.config
+config/build.log
+
+# Local apt caches
+/var/cache/apt/archives/*.deb
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*~
+*.swp

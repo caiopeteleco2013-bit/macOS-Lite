@@ -1,0 +1,167 @@
+# macOS-Lite — packages installed into the live/chroot system image
+# Format: one package per line. Lines beginning with # are comments.
+
+# --- Base system (required to boot) ---
+linux-image-amd64
+linux-firmware
+firmware-linux-free
+systemd
+systemd-sysv
+udev
+dbus
+dbus-user-session
+polkitd
+polkit-kde-agent-1
+sudo
+nano
+bash-completion
+coreutils
+util-linux
+curl
+wget
+ca-certificates
+tzdata
+keyboard-configuration
+console-setup
+cryptsetup
+efibootmgr
+grub-pc
+grub-efi-amd64
+grub-common
+os-prober
+network-manager
+network-manager-gnome
+iptables
+iproute2
+iputils-ping
+ethtool
+dosfstools
+e2fsprogs
+xfsprogs
+ntfs-3g
+parted
+gptfdisk
+openssh-client
+openssh-server
+wireless-tools
+wpasupplicant
+firmware-iwlwifi
+firmware-ath9k-htc
+firmware-realtek
+firmware-bnx2x
+firmware-misc-nonfree
+
+# --- Seat / input / display (Wayland) ---
+seatd
+elogind
+libpam-elogind
+libseat1
+mesa-vulkan-drivers
+mesa-va-drivers
+mesa-vdpau-drivers
+libgl1-mesa-dri
+libglx-mesa0
+libegl1-mesa
+libgles2
+xwayland
+wlroots-tools
+wlr-randr
+brightnessctl
+xkb-data
+xwayland
+
+# --- Audio (PipeWire) ---
+pipewire
+pipewire-pulse
+pipewire-alsa
+pipewire-jack
+wireplumber
+alsa-utils
+pavucontrol
+
+# --- Compositor + window management ---
+wayfire
+wayfire-plugins-extra
+
+# --- Shell / chrome (macOS-like) ---
+wofi
+plank
+dunst
+gtk4
+libgtk-4-dev
+liblayershell0-dev
+gir1.2-gtk-4.0
+gir1.2-glayer-shell-0.1
+python3-gi
+python3-cairo
+python3-dbus
+python3-gi-cairo
+adwaita-icon-theme   # reference theme only; not default
+papirus-icon-theme
+fonts-inter
+fonts-jetbrains-mono
+gtk4-examples
+
+# --- Default applications ---
+firefox-esr
+foot
+foot-terminfo
+gedit
+thunar
+thunar-archive-plugin
+viewnior
+atril
+file-roller
+gvfs
+gvfs-backends
+gvfs-fuse
+gvfs-gphoto2
+gvfs-mtp
+gvfs-smb
+udisk2
+udisks2
+qt5ct
+qt6ct
+lximage-qt
+
+# --- Printing (optional but expected on a desktop) ---
+cups
+cups-browsed
+printer-driver-all
+system-config-printer
+
+# --- Custom macOS-Lite shell (built from src/, installed as .deb) ---
+# mlite-bar
+# mlite-control-center
+# mlite-notification-center
+# mlite-launcher
+# (installed from config/includes.chroot/root/debs/*.deb during build)
+
+# --- System tuning ---
+zram-generator
+systemd-timesyncd
+systemd-resolved
+cron
+logrotate
+whois
+mc
+htop
+btop
+neofetch
+
+# --- Calamares installer (graphical) ---
+calamares
+calamares-settings-python
+calamares-webview-engine
+qml-module-qtquick2
+qml-module-qtquick-controls
+qml-module-qtquick-layouts
+qml-module-qtquick-window2
+qtdeclarative5-dev
+qtbase5-dev
+extra-cmake-modules
+
+# --- Documentation / help ---
+man-db
+manpages
+macos-lite-docs   # our docs package (installation + updates)

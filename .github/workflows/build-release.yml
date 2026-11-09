@@ -1,0 +1,297 @@
+name: Build macOS-Lite ISO
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: 'ISO variant'
+        required: false
+        default: 'default'
+        type: choice
+        options:
+          - default
+          - nonfree-firmware
+
+env:
+  ROOT_DIR: .
+  SOURCE_DATE_EPOCH: 1700000000   # fixed for reproducible builds (override per-release/tag)
+
+jobs:
+  # ------------------------------------------------------------------
+  # Build the ISO (matrix: variant x arch)
+  # ------------------------------------------------------------------
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [ default, nonfree-firmware ]
+        architecture: [ amd64 ]
+        include:
+          - variant: default
+            apt-areas: "main contrib non-free-firmware"
+          - variant: nonfree-firmware
+            apt-areas: "main contrib non-free-firmware"
+
+    permissions:
+      contents: read        # to fetch sources
+      id-token: write       # for OIDC (optional future use)
+
+    container:
+      image: debian:bookworm
+      options: >-
+        --user root
+        --workdir /workspace
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # needed for tags/version
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            live-build debootstrap git xorriso squashfs-tools \
+            grub-pc-bin grub-efi-amd64-bin mtools e2fsprogs \
+            gnupg gnupg2 qemu-system-x86 qemu-utils socat \
+            ca-certificates curl xz-utils file
+
+      - name: Restore apt cache
+        id: cache-apt
+        uses: actions/cache/restore@v4
+        with:
+          path: /var/cache/apt/archives
+          key: ${{ runner.os }}-apt-${{ matrix.variant }}-${{ hashFiles('config/archives/*.list') }}
+          restore-keys: |
+            ${{ runner.os }}-apt-${{ matrix.variant }}-
+
+      - name: Restore ccache (for any custom package builds)
+        id: cache-ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: /root/.ccache
+          key: ${{ runner.os }}-ccache-${{ matrix.variant }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-${{ matrix.variant }}-
+
+      - name: Set SOURCE_DATE_EPOCH from tag (reproducibility)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG_DATE=$(git log -1 --format=%ct "${{ github.ref }}")
+          echo "SOURCE_DATE_EPOCH=$TAG_DATE" >> "$GITHUB_ENV"
+          echo "Using tag date $TAG_DATE as SOURCE_DATE_EPOCH"
+
+      - name: Build ISO
+        id: build
+        run: |
+          chmod +x scripts/build-iso.sh
+          ./scripts/build-iso.sh "${{ matrix.variant }}"
+          echo "iso_path=$(ls build/image/macos-lite-*.iso | head -1)" >> "$GITHUB_OUTPUT"
+          echo "iso_name=$(basename $(ls build/image/macos-lite-*.iso | head -1))" >> "$GITHUB_OUTPUT"
+
+      - name: Save build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ matrix.variant }}
+          path: |
+            build/image/*.sha256
+            build/image/*.build
+            build/image/*.log
+        retention-days: 7
+
+      - name: Save ISO (unsigned, interim)
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-lite-unsigned-${{ matrix.variant }}-${{ matrix.architecture }}
+          path: build/image/macos-lite-${{ matrix.variant }}-amd64-*.iso
+        retention-days: 7
+
+  # ------------------------------------------------------------------
+  # Sign the ISO (GPG) — runs on tag pushes only (releases)
+  # ------------------------------------------------------------------
+  sign:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    container:
+      image: debian:bookworm
+      options: >-
+        --user root
+        --workdir /workspace
+
+    permissions:
+      contents: write   # to create release / upload assets
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gnupg
+
+      - name: Download unsigned ISOs (all variants)
+        uses: actions/download-artifact@v4
+        with:
+          path: build/image
+          merge-multiple: true
+
+      - name: Import GPG signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.MACOS_LITE_GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.MACOS_LITE_GPG_PASSPHRASE }}
+        run: |
+          if [ -z "$GPG_PRIVATE_KEY" ]; then
+            echo "WARNING: MACOS_LITE_GPG_PRIVATE_KEY not set. Skipping signing."
+            echo "skip_signing=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          echo "$GPG_PRIVATE_KEY" | gpg --import --batch --yes
+          if [ -n "$GPG_PASSPHRASE" ]; then
+            # Set trust so --default-key works without passphrase prompts
+            echo "trust-signing-key" 
+            gpg --list-secret-keys --keyid-format long
+          fi
+          echo "skip_signing=false" >> "$GITHUB_ENV"
+
+      - name: Sign ISOs and checksums
+        if: env.skip_signing != 'true'
+        run: |
+          chmod +x scripts/sign-release.sh
+          for iso in build/image/macos-lite-*.iso; do
+            [ -f "$iso" ] || continue
+            ./scripts/sign-release.sh "$iso" macos-lite-release
+          done
+
+      - name: Upload signed artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-lite-signed-${{ github.ref_name }}
+          path: |
+            build/image/*.iso
+            build/image/*.iso.sha256
+            build/image/*.iso.sha256.sig
+            build/image/*.iso.sig
+        retention-days: 30
+
+  # ------------------------------------------------------------------
+  # QEMU smoke test — runs on every build (PRs too)
+  # ------------------------------------------------------------------
+  smoke-test:
+    needs: build
+    runs-on: ubuntu-latest
+    container:
+      image: debian:bookworm
+      options: >-
+        --user root
+        --workdir /workspace
+
+    strategy:
+      matrix:
+        variant: [ default, nonfree-firmware ]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install QEMU
+        run: |
+          apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils socat
+
+      - name: Download ISO
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-lite-unsigned-${{ matrix.variant }}-amd64
+          path: build/image
+
+      - name: Run QEMU smoke test
+        id: smoke
+        run: |
+          chmod +x scripts/qemu-smoke.sh
+          ISO=$(ls build/image/macos-lite-${{ matrix.variant }}-amd64-*.iso | head -1)
+          ./scripts/qemu-smoke.sh "$ISO" 2048 180 || true
+          cp smoke-result.json smoke-result-${{ matrix.variant }}.json 2>/dev/null || true
+
+      - name: Upload smoke result
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-result-${{ matrix.variant }}
+          path: smoke-result-*.json
+        retention-days: 7
+
+      - name: Fail on smoke test failure
+        if: failure()
+        run: |
+          echo "QEMU smoke test failed for ${{ matrix.variant }}"
+          cat smoke-result-*.json 2>/dev/null || true
+          exit 1
+
+  # ------------------------------------------------------------------
+  # Release — create GitHub Release and attach signed artifacts
+  # ------------------------------------------------------------------
+  release:
+    needs: [ sign, smoke-test ]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download signed artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-lite-signed-${{ github.ref_name }}
+          path: release-assets
+
+      - name: List release assets
+        run: ls -la release-assets
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: macOS-Lite ${{ github.ref_name }}
+          body: |
+            ## macOS-Lite ${{ github.ref_name }}
+
+            Reproducible, signed ISO images built from Debian Stable with the
+            macOS-Lite lightweight desktop stack (Wayfire + custom GTK4 shell).
+
+            ### Assets
+            - `macos-lite-default-amd64-<date>.iso` — DFSG-free live/install ISO
+            - `macos-lite-nonfree-firmware-amd64-<date>.iso` — includes Wi-Fi/GPU firmware
+            - `.sha256` — checksum file
+            - `.sha256.sig` / `.iso.sig` — GPG detached signatures
+
+            ### Verify
+            ```bash
+            gpg --verify macos-lite-*.iso.sha256.sig macos-lite-*.iso.sha256
+            sha256sum -c macos-lite-*.iso.sha256
+            ```
+
+            ### Smoke test
+            Each release is boot-tested in QEMU before publishing. See
+            `scripts/qemu-smoke.sh` and `docs/ci-cd.md`.
+
+            See `docs/install.md` for installation and `docs/compliance.md`
+            for the licensing checklist.
+          draft: false
+          prerelease: false
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

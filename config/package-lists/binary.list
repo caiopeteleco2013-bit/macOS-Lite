@@ -1,0 +1,17 @@
+# macOS-Lite — packages included in the binary (live) image but not necessarily
+# in the installed system. Kept minimal to stay under the ISO size target.
+
+isolinux
+grub-pc-bin
+grub-efi-amd64-bin
+grub-efi-amd64-signed
+mtools
+xorriso
+squashfs-tools
+live-boot
+live-config
+live-config-systemd
+memtest86+   # optional; keep small
+
+# Firmware for live environment (Wi-Fi / GPU) — opt-in via non-free-firmware area.
+# Kept out of default binary list to keep the default image DFSG-free.

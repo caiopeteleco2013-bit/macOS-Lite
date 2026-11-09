@@ -1,0 +1,235 @@
+#!/bin/sh
+# live-build chroot hook: install desktop/compositor/shell configuration.
+# Places wayfire, plank, dunst, wofi configs and autostart entries.
+
+set -e
+
+USERNAME="${LIVE_USER:-user}"
+USERHOME="/home/$USERNAME"
+
+# ---- Wayfire config ----
+mkdir -p /etc/xdg/wayfire
+cat > /etc/xdg/wayfire/config.ini <<'EOF'
+[core]
+disable_startup_notification = true
+
+[workarounds]
+focus_feedback = true
+
+[view]
+maximized_are_fullscreen = true
+
+[workspace]
+workspaces = 4
+
+[wobbly]
+enabled = true
+duration = 150
+
+[fade]
+enabled = true
+duration = 120
+
+[scale]
+enabled = true
+duration = 150
+
+[dim]
+enabled = true
+inactive_dim = 0.55
+
+[animation]
+duration = 180
+
+[gestures]
+workspace_swipe = true
+
+[expo]
+enabled = true
+
+[cube]
+enabled = false
+
+[switcher]
+mode = window
+
+[autostart]
+mlite-bar = /usr/bin/mlite-bar
+plank = /usr/bin/plank
+dunst = /usr/bin/dunst
+EOF
+
+# ---- Plank dock settings ----
+mkdir -p /etc/xdg/plank
+cat > /etc/xdg/plank/dock1.settings <<'EOF'
+[Dock1]
+Screen = 0
+Monitor = 0
+IconSize = 48
+ZoomAmount = 1.45
+HideMode = Intelligent
+HideDelay = 500
+UnhideDelay = 100
+Offset = 0
+ItemsAlign = Center
+PinOnLaunch = true
+LauncherPosition = 0
+Theme = Gtk+
+Current = Gtk+
+Position = Bottom
+EOF
+
+# ---- dunst notification config ----
+mkdir -p /etc/dunst
+cat > /etc/dunst/dunstrc <<'EOF'
+[global]
+    monitor = 0
+    follow = none
+    geometry = "300x5-30+30"
+    indicate_hidden = yes
+    shrink = no
+    sort = yes
+    idle_threshold = 120
+    font = Inter 11
+    line_height = 0
+    transparency = 0
+    icon_position = left
+    sticky_history = yes
+    history_length = 20
+    show_age_threshold = 60
+    word_wrap = yes
+    ellipse_length = 50
+    ignore_newline = no
+    stack_duplicates = true
+    hide_duplicate_count = no
+    show_indicators = yes
+
+    frame_width = 0
+    frame_color = "#aaaaaa"
+
+    separator_height = 2
+    padding = 10
+    horizontal_padding = 10
+
+    startup_notification = false
+    dmenu = /usr/bin/wofi --dmenu
+
+    mouse_left_click = close
+    mouse_middle_click = do_action, close
+    mouse_right_click = close
+    mouse_scroll_up = prev, do_action
+    mouse_scroll_down = next, do_action
+
+    filter = ""
+
+[shortcuts]
+    close = ctrl+shift+space
+    close_all = ctrl+shift+period
+    history = ctrl+shift+grave
+    context = ctrl+shift+semicolon
+
+[urgency_low]
+    background = "#2e3440"
+    foreground = "#d8dee9"
+    timeout = 10
+
+[urgency_normal]
+    background = "#2e3440"
+    foreground = "#d8dee9"
+    timeout = 10
+
+[urgency_critical]
+    background = "#bf616a"
+    foreground = "#d8dee9"
+    timeout = 0
+EOF
+
+# ---- wofi config (Spotlight-like launcher) ----
+mkdir -p /etc/wofi
+cat > /etc/wofi/config <<'EOF'
+width=500
+height=400
+location=center
+show=drun
+prompt=Search
+cache_file=/var/cache/wofi/applications.cache
+normal_window=true
+allow_images=true
+show_drun=true
+insensitive=true
+EOF
+cat > /etc/wofi/style.css <<'EOF'
+window {
+    margin: 0px;
+    border: 2px solid #0a84ff;
+    border-radius: 10px;
+    font-family: "Inter";
+    font-size: 14px;
+}
+#input {
+    margin: 10px;
+    border: none;
+    border-bottom: 2px solid #0a84ff;
+    border-radius: 0px;
+    color: #d8dee9;
+    background-color: #1c1c1e;
+}
+#inner-box {
+    margin: 10px;
+    border: none;
+    border-radius: 10px;
+    background-color: #1c1c1e;
+}
+#outer-box {
+    margin: 10px;
+    border: none;
+    border-radius: 10px;
+    background-color: #1c1c1e;
+}
+#entry:selected {
+    background-color: #0a84ff;
+    color: #ffffff;
+    border-radius: 6px;
+}
+EOF
+
+# ---- Autostart desktop files (system-wide defaults) ----
+mkdir -p /etc/xdg/autostart
+cat > /etc/xdg/autostart/mlite-bar.desktop <<'EOF'
+[Desktop Entry]
+Name=macOS-Lite Bar
+Comment=Top bar / system menu
+Exec=mlite-bar
+Type=Application
+Categories=System;
+OnlyShowIn=Wayfire;
+EOF
+cat > /etc/xdg/autostart/plank.desktop <<'EOF'
+[Desktop Entry]
+Name=Plank Dock
+Comment=Dock
+Exec=plank
+Type=Application
+Categories=System;
+OnlyShowIn=Wayfire;
+EOF
+cat > /etc/xdg/autostart/dunst.desktop <<'EOF'
+[Desktop Entry]
+Name=Dunst Notifications
+Comment=Lightweight notification daemon
+Exec=dunst
+Type=Application
+Categories=System;
+OnlyShowIn=Wayfire;
+EOF
+
+# ---- Per-user skeleton config (copied to new users at install) ----
+mkdir -p /etc/skel/.config/wayfire
+cp /etc/xdg/wayfire/config.ini /etc/skel/.config/wayfire/config.ini
+mkdir -p /etc/skel/.config/plank /etc/skel/.config/dunst /etc/skel/.config/wofi
+cp /etc/xdg/plank/dock1.settings /etc/skel/.config/plank/dock1.settings
+cp /etc/dunst/dunstrc /etc/skel/.config/dunst/dunstrc
+cp /etc/wofi/config /etc/skel/.config/wofi/config
+cp /etc/wofi/style.css /etc/skel/.config/wofi/style.css
+
+echo "[0200-desktop-config] done"

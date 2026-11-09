@@ -1,0 +1,7 @@
+# APT sources inside the chroot (live system + installed system)
+deb https://deb.debian.org/debian/ bookworm main contrib non-free-firmware
+deb https://security.debian.org/debian-security bookworm-security main contrib non-free-firmware
+deb https://deb.debian.org/debian/ bookworm-updates main contrib non-free-firmware
+
+# macOS-Lite custom packages (local .deb repo during build)
+# deb [trusted=yes] file:/var/lib/macos-lite/repo ./
