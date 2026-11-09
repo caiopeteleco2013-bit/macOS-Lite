@@ -5,15 +5,6 @@ on:
     branches: [ main ]
     tags: [ 'v*' ]
   workflow_dispatch:
-    inputs:
-      variant:
-        description: 'ISO variant'
-        required: false
-        default: 'default'
-        type: choice
-        options:
-          - default
-          - nonfree-firmware
 
 jobs:
   build:
@@ -38,37 +29,18 @@ jobs:
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            live-build debootstrap git xorriso squashfs-tools \
-            grub-pc-bin grub-efi-amd64-bin mtools e2fsprogs \
-            curl dpkg wget
+            debootstrap curl dpkg grub-pc grub-efi-amd64 grub-mkrescue \
+            xorriso mksquashfs mtools wget gpg
 
       - name: Build ISO
-        id: build
-        continue-on-error: true
         run: |
           chmod +x scripts/build-iso.sh
-          ./scripts/build-iso.sh "${{ matrix.variant }}" || true
-          ISO_PATH=$(ls build/image/macos-lite-*.iso 2>/dev/null | head -1 || true)
-          if [ -n "$ISO_PATH" ]; then
-            echo "iso_path=$ISO_PATH" >> "$GITHUB_OUTPUT"
-            echo "iso_name=$(basename "$ISO_PATH")" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Debug info
-        if: always()
-        run: |
-          echo "=== build/image contents ==="
-          ls -laR build/image/ 2>/dev/null || echo "build/image/ does not exist"
-          echo "=== build.log tail ==="
-          tail -100 build/image/build.log 2>/dev/null || echo "no build.log"
+          ./scripts/build-iso.sh "${{ matrix.variant }}"
 
       - name: Upload ISO artifacts
-        if: always()
-        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: macos-lite-${{ matrix.variant }}-amd64
           path: |
             build/image/*.iso
             build/image/*.sha256
-            build/image/build.log
