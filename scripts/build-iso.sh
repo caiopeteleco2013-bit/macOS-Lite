@@ -1,8 +1,6 @@
 #!/bin/bash
 #
 # build-iso.sh — Build a reproducible macOS-Lite ISO.
-# Downloads .deb packages directly from Debian's package pool using curl
-# and installs them with dpkg. Creates the chroot with debootstrap.
 #
 # Usage: ./scripts/build-iso.sh [variant]
 #   variant: "" (default, DFSG-free) | "nonfree-firmware"
@@ -24,12 +22,14 @@ export DEBIAN_FRONTEND=noninteractive
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-echo "=== macOS-Lite ISO build ==="
+echo "========================================="
+echo "  macOS-Lite ISO Build"
+echo "========================================="
 echo "Root:        $ROOT_DIR"
 echo "Variant:     $VARIANT"
 echo "SOURCE_DATE_EPOCH: $SOURCE_DATE_EPOCH"
-echo "USER:        $(whoami)"
 echo "DATE:        $(date -u)"
+echo "========================================="
 
 # ---- Clean previous build artifacts ----
 rm -rf "$OUTPUT_DIR"
@@ -38,8 +38,9 @@ mkdir -p "$OUTPUT_DIR"
 exec > >(tee -a "$BUILD_LOG") 2>&1
 
 # ---- Prerequisite check ----
-echo "=== Prerequisite check ==="
-for cmd in curl dpkg xorriso grub-mkrescue mksquashfs mtools wget gpg; do
+echo ""
+echo "=== [1/8] Prerequisite check ==="
+for cmd in curl dpkg xorriso grub-mkrescue mksquashfs mtools wget gpg debootstrap; do
     if command -v "$cmd" >/dev/null 2>&1; then
         echo "  OK: $cmd -> $(command -v "$cmd")"
     else
@@ -48,38 +49,9 @@ for cmd in curl dpkg xorriso grub-mkrescue mksquashfs mtools wget gpg; do
     fi
 done
 
-# ---- Download debootstrap from Debian pool ----
-echo "=== Installing debootstrap ==="
-DEBOOTSTRAP_DEB="/tmp/debootstrap_all.deb"
-
-LATEST_VER=$(curl -fsSL --max-time 30 \
-    "http://deb.debian.org/debian/dists/bookworm/main/binary-all/Packages" 2>/dev/null \
-    | awk -v RS='' '/^Package: debootstrap$/{match($0,/Version: ([0-9.]+)/,a); print a[1]; exit}')
-
-if [ -z "$LATEST_VER" ]; then
-    LATEST_VER="1.0.131"
-fi
-echo "Target debootstrap version: $LATEST_VER"
-
-if ! curl -fsSL --max-time 60 \
-    -o "$DEBOOTSTRAP_DEB" \
-    "http://deb.debian.org/debian/pool/main/d/debootstrap/debootstrap_${LATEST_VER}_all.deb"; then
-    echo "ERROR: Failed to download debootstrap" >&2
-    exit 1
-fi
-
-dpkg -i "$DEBOOTSTRAP_DEB" 2>/dev/null || {
-    echo "dpkg -i had issues, trying --configure..."
-    dpkg --configure -a 2>/dev/null || true
-}
-
-which debootstrap || {
-    echo "ERROR: debootstrap not available" >&2
-    exit 1
-}
-echo "debootstrap: $(debootstrap --version)"
-
 # ---- Select archives ----
+echo ""
+echo "=== [2/8] Select archives ==="
 case "$VARIANT" in
     default)
         echo "Building DFSG-free variant."
@@ -95,21 +67,27 @@ case "$VARIANT" in
         ;;
 esac
 
-# ---- Stage shell source into chroot staging area ----
+# ---- Stage shell source into chroot ----
+echo ""
+echo "=== [3/8] Stage shell source ==="
 STAGE_DIR="$CONFIG_DIR/includes.chroot/opt/macos-lite/src"
 rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"
 if [ -d "$ROOT_DIR/src" ]; then
     cp -a "$ROOT_DIR/src/." "$STAGE_DIR/"
-    echo "Staged shell source"
+    echo "Staged shell source from $ROOT_DIR/src"
+else
+    echo "WARNING: No src/ directory found"
 fi
 
 # ---- Create chroot with debootstrap ----
-echo "=== Creating Debian chroot with debootstrap ==="
+echo ""
+echo "=== [4/8] Create Debian chroot ==="
 CHROOT_DIR="/tmp/macos-lite-chroot"
 rm -rf "$CHROOT_DIR"
 mkdir -p "$CHROOT_DIR"
 
+echo "Running debootstrap --variant=minimal --arch=amd64 bookworm..."
 debootstrap --no-verify-gpg \
     --variant=minimal \
     --arch=amd64 \
@@ -118,36 +96,90 @@ debootstrap --no-verify-gpg \
     echo "ERROR: debootstrap failed" >&2
     exit 1
 }
-echo "Chroot created at $CHROOT_DIR"
 
-# ---- Verify chroot has basic structure ----
+# Verify chroot base system
 if [ ! -f "$CHROOT_DIR/bin/bash" ]; then
-    echo "ERROR: Chroot missing /bin/bash - debootstrap failed" >&2
+    echo "ERROR: Chroot missing /bin/bash" >&2
     exit 1
 fi
 echo "Chroot base system OK"
 
-# ---- Copy includes.chroot into chroot ----
-echo "=== Copying custom files into chroot ==="
+# ---- Copy includes.chroot ----
+echo ""
+echo "=== [5/8] Copy custom files into chroot ==="
 cp -a "$CONFIG_DIR/includes.chroot/." "$CHROOT_DIR/"
+echo "Copied includes.chroot"
 
-# ---- Download essential packages directly from Debian pool ----
-echo "=== Downloading essential packages ==="
+# ---- Download and install kernel + essential packages ----
+echo ""
+echo "=== [6/8] Download and install packages ==="
 PKG_DIR="/tmp/macos-lite-pkgs"
 rm -rf "$PKG_DIR"
 mkdir -p "$PKG_DIR"
 
+# Kernel is critical - must be installed
+echo "Resolving linux-image-amd64..."
+KERNEL_DEB=$(curl -fsSL --max-time 30 \
+    "http://deb.debian.org/debian/dists/bookworm/main/binary-amd64/Packages" 2>/dev/null \
+    | awk -v RS='' '/^Package: linux-image-amd64$/{match($0,/Filename: ([^\n]+)/,a); print a[1]; exit}')
+
+if [ -z "$KERNEL_DEB" ]; then
+    echo "ERROR: Could not find linux-image-amd64 in archive" >&2
+    exit 1
+fi
+echo "Found: $KERNEL_DEB"
+
+curl -fsSL --max-time 120 \
+    -o "$PKG_DIR/linux-image-amd64.deb" \
+    "http://deb.debian.org/debian/${KERNEL_DEB}" || {
+    echo "ERROR: Failed to download linux-image-amd64" >&2
+    exit 1
+}
+echo "Downloaded linux-image-amd64"
+
+# Also get linux-base (dependency)
+echo "Resolving linux-base..."
+LINUX_BASE_DEB=$(curl -fsSL --max-time 30 \
+    "http://deb.debian.org/debian/dists/bookworm/main/binary-amd64/Packages" 2>/dev/null \
+    | awk -v RS='' '/^Package: linux-base$/{match($0,/Filename: ([^\n]+)/,a); print a[1]; exit}')
+
+if [ -n "$LINUX_BASE_DEB" ]; then
+    curl -fsSL --max-time 60 \
+        -o "$PKG_DIR/linux-base.deb" \
+        "http://deb.debian.org/debian/${LINUX_BASE_DEB}" || {
+        echo "WARNING: Failed to download linux-base (non-critical)"
+    }
+    echo "Downloaded linux-base"
+fi
+
+# Install into chroot
+echo "Installing kernel into chroot..."
+dpkg --root="$CHROOT_DIR" -i "$PKG_DIR/linux-image-amd64.deb" 2>&1 || {
+    echo "dpkg --root failed, trying manual extraction..."
+    dpkg-deb -x "$PKG_DIR/linux-image-amd64.deb" "$CHROOT_DIR/" 2>/dev/null || true
+}
+
+# Verify kernel
+KERNEL_COUNT=$(ls "$CHROOT_DIR/boot/vmlinuz-*amd64" 2>/dev/null | wc -l)
+if [ "$KERNEL_COUNT" -eq 0 ]; then
+    echo "ERROR: No kernel found in chroot after installation" >&2
+    echo "Contents of /boot in chroot:" >&2
+    ls -la "$CHROOT_DIR/boot/" 2>/dev/null || echo "  (no /boot directory)" >&2
+    exit 1
+fi
+echo "Kernel installed: $KERNEL_COUNT file(s)"
+
+# Install other essential packages
+echo ""
+echo "Installing other essential packages..."
 ESSENTIAL_PKGS=(
     wayfire plank dunst wofi pipewire pipewire-pulse wireplumber
     network-manager seatd elogind brightnessctl wlr-randr
     firefox-esr foot gedit thunar viewnior
-    linux-image-amd64
     grub-pc grub-efi-amd64
-    e2fsprogs dosfstools
 )
 
 for pkg in "${ESSENTIAL_PKGS[@]}"; do
-    echo "Resolving $pkg..."
     PKG_FILE=$(curl -fsSL --max-time 30 \
         "http://deb.debian.org/debian/dists/bookworm/main/binary-amd64/Packages" 2>/dev/null \
         | awk -v p="$pkg" '
@@ -157,65 +189,23 @@ for pkg in "${ESSENTIAL_PKGS[@]}"; do
     if [ -n "$PKG_FILE" ]; then
         DEB_FILE="$PKG_DIR/$(basename "$PKG_FILE")"
         if [ ! -f "$DEB_FILE" ]; then
-            if curl -fsSL --max-time 60 \
+            curl -fsSL --max-time 60 \
                 -o "$DEB_FILE" \
-                "http://deb.debian.org/debian/${PKG_FILE}"; then
-                echo "  OK: $(basename "$PKG_FILE")"
-            else
-                echo "  WARNING: Failed to download $pkg"
+                "http://deb.debian.org/debian/${PKG_FILE}" 2>/dev/null || {
+                echo "  WARNING: Failed $pkg"
                 continue
-            fi
-        else
-            echo "  OK (cached): $(basename "$PKG_FILE")"
+            }
         fi
-    else
-        echo "  WARNING: $pkg not found in main archive, trying contrib/non-free..."
-        PKG_FILE=$(curl -fsSL --max-time 30 \
-            "http://deb.debian.org/debian/dists/bookworm/contrib/binary-amd64/Packages" 2>/dev/null \
-            | awk -v p="$pkg" '
-                $1=="Package:" && $2==p {f=1}
-                f && $1=="Filename:" {print $2; f=0; exit}
-            ')
-        if [ -n "$PKG_FILE" ]; then
-            DEB_FILE="$PKG_DIR/$(basename "$PKG_FILE")"
-            if [ ! -f "$DEB_FILE" ]; then
-                if curl -fsSL --max-time 60 \
-                    -o "$DEB_FILE" \
-                    "http://deb.debian.org/debian/${PKG_FILE}"; then
-                    echo "  OK: $(basename "$PKG_FILE")"
-                else
-                    echo "  WARNING: Failed to download $pkg"
-                    continue
-                fi
-            else
-                echo "  OK (cached): $(basename "$PKG_FILE")"
-            fi
-        else
-            echo "  WARNING: $pkg not found anywhere"
-        fi
+        echo "Installing $(basename "$DEB_FILE")..."
+        dpkg --root="$CHROOT_DIR" -i "$DEB_FILE" 2>/dev/null || {
+            dpkg-deb -x "$DEB_FILE" "$CHROOT_DIR/" 2>/dev/null || true
+        }
     fi
 done
 
-# Install downloaded packages into chroot
-echo "=== Installing packages into chroot ==="
-for deb in "$PKG_DIR"/*.deb; do
-    [ -f "$deb" ] || continue
-    echo "Installing $(basename "$deb") into chroot..."
-    dpkg --root="$CHROOT_DIR" -i "$deb" 2>/dev/null || {
-        echo "  dpkg --root failed, extracting manually..."
-        dpkg-deb -x "$deb" "$CHROOT_DIR/" 2>/dev/null || true
-    }
-done
-
-# ---- Verify kernel exists in chroot ----
-if [ ! -f "$CHROOT_DIR/boot/vmlinuz-*amd64" ]; then
-    echo "ERROR: No kernel found in chroot - ISO will not boot" >&2
-    exit 1
-fi
-echo "Kernel found in chroot"
-
 # ---- Run chroot hooks ----
-echo "=== Running chroot hooks ==="
+echo ""
+echo "=== [7/8] Run chroot hooks ==="
 for hook in "$CONFIG_DIR"/hooks/*.hook.chroot; do
     [ -f "$hook" ] || continue
     hn=$(basename "$hook")
@@ -227,23 +217,26 @@ for hook in "$CONFIG_DIR"/hooks/*.hook.chroot; do
     rm -f "$CHROOT_DIR/tmp/hook_$hn"
 done
 
-# ---- Create the ISO ----
-echo "=== Creating ISO image ==="
+# ---- Verify kernel and initrd exist ----
+echo ""
+echo "=== [8/8] Create ISO image ==="
+KERNEL=$(ls "$CHROOT_DIR/boot/vmlinuz-*amd64" | head -1)
+INITRD=$(ls "$CHROOT_DIR/boot/initrd.img-*amd64" | head -1)
+if [ -z "$KERNEL" ] || [ -z "$INITRD" ]; then
+    echo "ERROR: No kernel/initrd found in chroot" >&2
+    echo "Boot directory contents:" >&2
+    ls -la "$CHROOT_DIR/boot/" 2>/dev/null || echo "  (empty)" >&2
+    exit 1
+fi
+echo "Kernel: $(basename "$KERNEL")"
+echo "Initrd: $(basename "$INITRD")"
+
 ISO_DIR="$OUTPUT_DIR/iso"
 rm -rf "$ISO_DIR"
 mkdir -p "$ISO_DIR/boot/grub"
 
-KERNEL=$(ls "$CHROOT_DIR/boot/vmlinuz-*amd64" | head -1)
-INITRD=$(ls "$CHROOT_DIR/boot/initrd.img-*amd64" | head -1)
-if [ -n "$KERNEL" ] && [ -n "$INITRD" ]; then
-    cp "$KERNEL" "$ISO_DIR/boot/vmlinuz"
-    cp "$INITRD" "$ISO_DIR/boot/initrd.img"
-    echo "Kernel: $(basename "$KERNEL")"
-    echo "Initrd: $(basename "$INITRD")"
-else
-    echo "ERROR: No kernel/initrd found in chroot" >&2
-    exit 1
-fi
+cp "$KERNEL" "$ISO_DIR/boot/vmlinuz"
+cp "$INITRD" "$ISO_DIR/boot/initrd.img"
 
 cat > "$ISO_DIR/boot/grub/grub.cfg" <<'GRUBCFG'
 set default=0
@@ -262,6 +255,8 @@ menuentry "Shut down" {
 }
 GRUBCFG
 
+# Create the ISO
+echo "Creating ISO with xorriso..."
 xorriso -as mkisofs \
     -o "$OUTPUT_DIR/macos-lite-${VARIANT}-amd64-${DATESTAMP}.iso" \
     -V "macOS-Lite" \
@@ -275,7 +270,7 @@ xorriso -as mkisofs \
     exit 1
 }
 
-# ---- Verify ISO was created ----
+# ---- Verify ISO ----
 ISO_FILE="$OUTPUT_DIR/macos-lite-${VARIANT}-amd64-${DATESTAMP}.iso"
 if [ ! -f "$ISO_FILE" ]; then
     echo "ERROR: ISO file was not created" >&2
@@ -283,20 +278,23 @@ if [ ! -f "$ISO_FILE" ]; then
 fi
 
 ISO_SIZE=$(du -b "$ISO_FILE" | cut -f1)
-echo "ISO size: $ISO_SIZE bytes"
+echo "ISO size: $ISO_SIZE bytes ($(du -h "$ISO_FILE" | cut -f1))"
 
 if [ "$ISO_SIZE" -lt 1000000 ]; then
-    echo "ERROR: ISO too small ($ISO_SIZE bytes) - likely invalid" >&2
+    echo "ERROR: ISO too small ($ISO_SIZE bytes)" >&2
     exit 1
 fi
 
-# ---- Generate checksums ----
+# Generate checksums
 cd "$OUTPUT_DIR"
 sha256sum "macos-lite-${VARIANT}-amd64-${DATESTAMP}.iso" \
     > "macos-lite-${VARIANT}-amd64-${DATESTAMP}.iso.sha256"
 
 echo ""
-echo "=== Build complete ==="
+echo "========================================="
+echo "  BUILD SUCCESSFUL"
+echo "========================================="
 echo "ISO:       $OUTPUT_DIR/macos-lite-${VARIANT}-amd64-${DATESTAMP}.iso"
 echo "SHA256:    $OUTPUT_DIR/macos-lite-${VARIANT}-amd64-${DATESTAMP}.iso.sha256"
 echo "Size:      $(du -h "$OUTPUT_DIR/macos-lite-${VARIANT}-amd64-${DATESTAMP}.iso" | cut -f1)"
+echo "========================================="
