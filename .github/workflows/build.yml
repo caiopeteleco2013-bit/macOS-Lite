@@ -31,15 +31,9 @@ jobs:
 
       - name: Build ISO
         id: build
-        continue-on-error: true
         run: |
           chmod +x scripts/build-iso.sh
-          ./scripts/build-iso.sh "${{ matrix.variant }}" || true
-          ISO_PATH=$(ls build/image/macos-lite-*.iso 2>/dev/null | head -1 || true)
-          if [ -n "$ISO_PATH" ]; then
-            echo "iso_path=$ISO_PATH" >> "$GITHUB_OUTPUT"
-            echo "iso_name=$(basename "$ISO_PATH")" >> "$GITHUB_OUTPUT"
-          fi
+          ./scripts/build-iso.sh "${{ matrix.variant }}"
 
       - name: Debug info
         if: always()
