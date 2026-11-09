@@ -1,4 +1,4 @@
-name: Build macOS-Lite ISO (debootstrap test)
+name: Build macOS-Lite ISO (apt test)
 
 on:
   push:
@@ -11,9 +11,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install debootstrap
+      - name: Test apt-get update
         run: |
+          echo "=== apt-get update ==="
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends debootstrap 2>&1 || echo "DEBOOTSTRAP INSTALL FAILED"
-          which debootstrap || echo "debootstrap not found"
-          debootstrap --version 2>&1 || echo "debootstrap version failed"
+          echo "UPDATE_EXIT_CODE: $?"
+
+      - name: Test wget
+        run: |
+          echo "=== wget test ==="
+          wget -q --spider http://archive.ubuntu.com/ubuntu/dists/noble/Release
+          echo "WGET_EXIT_CODE: $?"
