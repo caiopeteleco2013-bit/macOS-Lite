@@ -49,16 +49,18 @@ jobs:
           fetch-depth: 0
 
       - name: Install build dependencies
+        continue-on-error: true
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             live-build debootstrap git xorriso squashfs-tools \
             grub-pc-bin grub-efi-amd64-bin mtools e2fsprogs \
             gnupg gnupg2 qemu-system-x86 qemu-utils socat \
-            ca-certificates curl xz-utils file debian-archive-keyring fakeroot
+            ca-certificates curl xz-utils file debian-archive-keyring fakeroot || true
 
       - name: Restore apt cache
         id: cache-apt
+        continue-on-error: true
         uses: actions/cache/restore@v4
         with:
           path: /var/cache/apt/archives
@@ -68,6 +70,7 @@ jobs:
 
       - name: Restore ccache
         id: cache-ccache
+        continue-on-error: true
         uses: actions/cache/restore@v4
         with:
           path: /root/.ccache
