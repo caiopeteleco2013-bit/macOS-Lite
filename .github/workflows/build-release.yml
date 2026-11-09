@@ -110,7 +110,8 @@ jobs:
           path: build/image/
 
       - name: Save ISO (unsigned, interim)
-        if: success()
+        if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: macos-lite-unsigned-${{ matrix.variant }}-${{ matrix.architecture }}
