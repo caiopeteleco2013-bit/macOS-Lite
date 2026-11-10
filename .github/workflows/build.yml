@@ -29,18 +29,33 @@ jobs:
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            debootstrap curl dpkg grub-pc grub-efi-amd64 grub-common grub-pc-bin \
-            xorriso mksquashfs mtools wget gpg
+            curl wget gpg ca-certificates \
+            grub-pc-bin grub-efi-amd64-bin grub-common \
+            xorriso mtools squashfs-tools \
+            debootstrap dpkg
 
       - name: Build ISO
+        id: build
+        continue-on-error: true
         run: |
           chmod +x scripts/build-iso.sh
           ./scripts/build-iso.sh "${{ matrix.variant }}"
 
+      - name: Debug info
+        if: always()
+        run: |
+          echo "=== build/image contents ==="
+          ls -laR build/image/ 2>/dev/null || echo "(no build/image)"
+          echo ""
+          echo "=== build.log ==="
+          cat build/image/build.log 2>/dev/null || echo "(no build.log)"
+
       - name: Upload ISO artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: macos-lite-${{ matrix.variant }}-amd64
           path: |
             build/image/*.iso
             build/image/*.sha256
+            build/image/build.log
